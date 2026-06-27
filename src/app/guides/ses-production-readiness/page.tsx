@@ -12,9 +12,9 @@ import {
 } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "FreeResend SES production readiness guide",
+  title: "Waka SES production readiness guide",
   description:
-    "A practical SES, DNS, webhook, monitoring, and rollback checklist for teams preparing a FreeResend deployment for production email.",
+    "A practical SES, DNS, webhook, monitoring, and rollback checklist for teams preparing a Waka deployment for production email.",
 };
 
 const readinessSteps = [
@@ -33,7 +33,7 @@ const readinessSteps = [
   {
     icon: Workflow,
     title: "Wire bounce and complaint events",
-    copy: "Use SNS or EventBridge to feed FreeResend webhook handling, then test the path before any customer-facing transactional mail depends on it.",
+    copy: "Use SNS or EventBridge to feed Waka webhook handling, then test the path before any customer-facing transactional mail depends on it.",
     checks: ["Bounce path tested", "Complaint path tested", "Suppression updates observable"],
   },
   {
@@ -64,7 +64,7 @@ export default function SesProductionReadinessPage() {
       <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
         <nav className="mb-10 flex items-center justify-between">
           <Link href="/" className="text-sm font-medium text-[#525252] hover:text-[#171717]">
-            FreeResend
+            Waka
           </Link>
           <div className="flex items-center gap-4 text-sm font-medium">
             <Link href="/tools/email-dns-checker" className="text-[#525252] hover:text-[#171717]">
@@ -84,7 +84,7 @@ export default function SesProductionReadinessPage() {
             SES production readiness guide
           </h1>
           <p className="mt-4 text-[#525252] leading-7">
-            Use this guide before pointing a real application at FreeResend. It focuses on the launch details that
+            Use this guide before pointing a real application at Waka. It focuses on the launch details that
             usually create the first production incident: SES sandbox access, DNS authentication, webhook coverage,
             smoke tests, monitoring, and rollback ownership.
           </p>

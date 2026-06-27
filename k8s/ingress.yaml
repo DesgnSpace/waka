@@ -1,8 +1,8 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: freeresend-ingress
-  namespace: freeresend
+  name: waka-ingress
+  namespace: waka
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
@@ -17,27 +17,27 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - www.freeresend.com
-        - freeresend.com
-      secretName: freeresend-tls
+        - www.waka.com
+        - waka.com
+      secretName: waka-tls
   rules:
-    - host: www.freeresend.com
+    - host: www.waka.com
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: freeresend
+                name: waka
                 port:
                   number: 80
-    - host: freeresend.com
+    - host: waka.com
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: freeresend
+                name: waka
                 port:
                   number: 80

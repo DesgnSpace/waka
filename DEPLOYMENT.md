@@ -1,4 +1,4 @@
-# FreeResend Deployment Guide
+# Waka Deployment Guide
 
 ## Quick Deploy to Vercel
 
@@ -180,7 +180,7 @@ vercel --prod
 ## Support
 
 - **Documentation**: Check README.md and SETUP.md
-- **Issues**: [GitHub Issues](https://github.com/eibrahim/freeresend/issues)
+- **Issues**: [GitHub Issues](https://github.com/eibrahim/waka/issues)
 
 ---
 

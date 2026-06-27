@@ -1,33 +1,33 @@
 #!/bin/bash
 
-# FreeResend Kubernetes Update Script
+# Waka Kubernetes Update Script
 # Update deployment with new image
 
 set -e
 
 # Generate timestamp for unique image tag
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-IMAGE_TAG="registry.digitalocean.com/curatedletters/freeresend:${TIMESTAMP}"
+IMAGE_TAG="registry.digitalocean.com/curatedletters/waka:${TIMESTAMP}"
 
-echo "🔄 Updating FreeResend deployment..."
+echo "🔄 Updating Waka deployment..."
 
 # Build and push new image
 echo "📦 Building Docker image with tag: ${IMAGE_TAG}"
 docker build --platform linux/amd64 -t ${IMAGE_TAG} .
-docker tag ${IMAGE_TAG} registry.digitalocean.com/curatedletters/freeresend:latest
+docker tag ${IMAGE_TAG} registry.digitalocean.com/curatedletters/waka:latest
 
 echo "🔄 Pushing to Digital Ocean Container Registry..."
 docker push ${IMAGE_TAG}
-docker push registry.digitalocean.com/curatedletters/freeresend:latest
+docker push registry.digitalocean.com/curatedletters/waka:latest
 
 # Update deployment
 echo "🚀 Updating Kubernetes deployment..."
-kubectl set image deployment/freeresend freeresend=${IMAGE_TAG} -n freeresend
+kubectl set image deployment/waka waka=${IMAGE_TAG} -n waka
 
 echo "⏳ Waiting for rollout to complete..."
-kubectl rollout status deployment/freeresend -n freeresend --timeout=300s
+kubectl rollout status deployment/waka -n waka --timeout=300s
 
 echo "🔍 Deployment status..."
-kubectl get pods -n freeresend
+kubectl get pods -n waka
 
-echo "✅ FreeResend update completed!"
+echo "✅ Waka update completed!"

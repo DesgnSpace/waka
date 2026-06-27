@@ -4,10 +4,10 @@
 
 import {
   getResendCost,
-  getFreeResendCost,
+  getWakaCost,
   getBestHostedTier,
   getHostedCost,
-  getFreeResendHostedCost,
+  getWakaHostedCost,
   comparePricing,
   formatUSD,
   formatPercent,
@@ -78,7 +78,7 @@ describe('getResendCost', () => {
   });
 });
 
-describe('getFreeResendCost', () => {
+describe('getWakaCost', () => {
   it('should calculate correct costs with default parameters', () => {
     // New defaults: $0 platform fee + $15 hosting + $10 maintenance = $25 base cost
     const testCases: [number, number][] = [
@@ -95,41 +95,41 @@ describe('getFreeResendCost', () => {
     ];
 
     testCases.forEach(([volume, expected]) => {
-      const result = getFreeResendCost(volume);
+      const result = getWakaCost(volume);
       expect(result).toBeCloseTo(expected, 2);
     });
   });
 
   it('should handle custom flat fees and SES rates', () => {
     // Custom flat fee (still includes default hosting + maintenance)
-    expect(getFreeResendCost(0, 10.00, 0.10)).toBe(35.00); // $10 + $15 + $10
+    expect(getWakaCost(0, 10.00, 0.10)).toBe(35.00); // $10 + $15 + $10
 
     // Custom SES rate
-    expect(getFreeResendCost(10000, 0.00, 0.20)).toBe(27.00); // $0 + $15 + $10 + $2.00 SES
+    expect(getWakaCost(10000, 0.00, 0.20)).toBe(27.00); // $0 + $15 + $10 + $2.00 SES
 
     // Both custom
-    expect(getFreeResendCost(50000, 0, 0.05)).toBe(27.50); // $0 + $15 + $10 + $2.50 SES
+    expect(getWakaCost(50000, 0, 0.05)).toBe(27.50); // $0 + $15 + $10 + $2.50 SES
   });
 
   it('should handle edge cases', () => {
     // Negative volume clamped to 0
-    expect(getFreeResendCost(-1000, 0, 0.10)).toBe(25.00); // Base cost
+    expect(getWakaCost(-1000, 0, 0.10)).toBe(25.00); // Base cost
 
     // Volume above 5M clamped to 5M
-    expect(getFreeResendCost(10000000, 0, 0.10)).toBe(525.00); // Base + $500 SES
+    expect(getWakaCost(10000000, 0, 0.10)).toBe(525.00); // Base + $500 SES
 
     // Negative flat fee clamped to 0
-    expect(getFreeResendCost(1000, -5, 0.10)).toBe(25.10); // $0 + $15 + $10 + $0.10 SES
+    expect(getWakaCost(1000, -5, 0.10)).toBe(25.10); // $0 + $15 + $10 + $0.10 SES
 
     // Negative SES rate clamped to 0
-    expect(getFreeResendCost(1000, 0, -0.10)).toBe(25.00); // Base cost only
+    expect(getWakaCost(1000, 0, -0.10)).toBe(25.00); // Base cost only
   });
 
   it('should handle fractional calculations precisely', () => {
     // Test that we don't round up to next 1000 - linear pricing
-    expect(getFreeResendCost(1, 0, 0.10)).toBe(25.00);      // $0 + $15 + $10 + $0.00 (rounds to nearest cent)
-    expect(getFreeResendCost(500, 0, 0.10)).toBe(25.05);    // $0 + $15 + $10 + $0.05
-    expect(getFreeResendCost(2500001, 0, 0.10)).toBe(275.00); // Base + $250.00 SES (rounds to nearest cent)
+    expect(getWakaCost(1, 0, 0.10)).toBe(25.00);      // $0 + $15 + $10 + $0.00 (rounds to nearest cent)
+    expect(getWakaCost(500, 0, 0.10)).toBe(25.05);    // $0 + $15 + $10 + $0.05
+    expect(getWakaCost(2500001, 0, 0.10)).toBe(275.00); // Base + $250.00 SES (rounds to nearest cent)
   });
 });
 
@@ -188,30 +188,30 @@ describe('getHostedCost', () => {
   });
 });
 
-describe('getFreeResendHostedCost', () => {
+describe('getWakaHostedCost', () => {
   it('should return hosted tier costs', () => {
     // Should use single hosted tier for all volumes
-    const result1k = getFreeResendHostedCost(1000);
+    const result1k = getWakaHostedCost(1000);
     expect(result1k.tier.name).toBe('Hosted');
     expect(result1k.cost).toBe(0.00); // Free for ≤3000 emails
     
-    const result3k = getFreeResendHostedCost(3000);
+    const result3k = getWakaHostedCost(3000);
     expect(result3k.tier.name).toBe('Hosted');
     expect(result3k.cost).toBe(0.00); // Free for ≤3000 emails
 
-    const result5k = getFreeResendHostedCost(5000);
+    const result5k = getWakaHostedCost(5000);
     expect(result5k.tier.name).toBe('Hosted');
     expect(result5k.cost).toBe(15.00); // $15 flat fee for >3000 emails
 
-    const result30k = getFreeResendHostedCost(30000);
+    const result30k = getWakaHostedCost(30000);
     expect(result30k.tier.name).toBe('Hosted');
     expect(result30k.cost).toBe(15.00); // $15 flat fee
 
-    const result1M = getFreeResendHostedCost(1000000);
+    const result1M = getWakaHostedCost(1000000);
     expect(result1M.tier.name).toBe('Hosted');
     expect(result1M.cost).toBe(15.00); // $15 flat fee
 
-    const result1_5M = getFreeResendHostedCost(1500000);
+    const result1_5M = getWakaHostedCost(1500000);
     expect(result1_5M.tier.name).toBe('Hosted');
     expect(result1_5M.cost).toBe(15.00); // $15 flat fee
   });
@@ -223,7 +223,7 @@ describe('comparePricing', () => {
 
     // Should include all three pricing options
     expect(result.resendCost).toBe(20);
-    expect(result.freeResendCost).toBe(30.00); // $0 + $15 + $10 + $5 SES
+    expect(result.wakaCost).toBe(30.00); // $0 + $15 + $10 + $5 SES
     expect(result.hostedCost).toBe(20.00); // $15 service fee + $5 SES
 
     // Should calculate savings vs Resend for both options
@@ -247,7 +247,7 @@ describe('comparePricing', () => {
 
   it('should match acceptance criteria exactly', () => {
     const testCases: [number, number | null, number, number, number | null, number | null][] = [
-      // [volume, resendCost, freeResendCost, hostedCost, savingsAbs, savingsPct]
+      // [volume, resendCost, wakaCost, hostedCost, savingsAbs, savingsPct]
       [1000, 0, 25.10, 0.10, null, null],                   // Free tier - no savings calc
       [3000, 0, 25.30, 0.30, null, null],                   // Free tier - no savings calc
       [5000, 20, 25.50, 15.50, -5.50, -27.5],              // Self-hosted more expensive
@@ -260,11 +260,11 @@ describe('comparePricing', () => {
       [2500001, null, 275.00, 265.00, null, null],         // Contact sales - no savings
     ];
 
-    testCases.forEach(([volume, expectedResend, expectedFreeResend, expectedHosted, expectedSavingsAbs, expectedSavingsPct]) => {
+    testCases.forEach(([volume, expectedResend, expectedWaka, expectedHosted, expectedSavingsAbs, expectedSavingsPct]) => {
       const result = comparePricing(volume, 0.00, 0.10);
 
       expect(result.resendCost).toBe(expectedResend);
-      expect(result.freeResendCost).toBeCloseTo(expectedFreeResend, 2);
+      expect(result.wakaCost).toBeCloseTo(expectedWaka, 2);
       expect(result.hostedCost).toBeCloseTo(expectedHosted, 2);
 
       if (expectedSavingsAbs !== null) {
@@ -332,7 +332,7 @@ describe('calculateSavings', () => {
     const result = calculateSavings({ volume: 50000 });
 
     expect(result.resendCost).toBe(20);
-    expect(result.freeResendCost).toBe(30.00); // $0 + $15 + $10 + $5 SES
+    expect(result.wakaCost).toBe(30.00); // $0 + $15 + $10 + $5 SES
     expect(result.hostedCost).toBe(20.00); // $15 service fee + $5 SES
     expect(result.savingsAbs).toBeCloseTo(-10.00, 2); // Self-hosted more expensive
     expect(result.savingsPct).toBeCloseTo(-50.0, 1);
@@ -348,7 +348,7 @@ describe('calculateSavings', () => {
     });
 
     expect(result.resendCost).toBe(35);
-    expect(result.freeResendCost).toBe(30.00); // $0 + $15 + $10 + $5 SES
+    expect(result.wakaCost).toBe(30.00); // $0 + $15 + $10 + $5 SES
     expect(result.hostedCost).toBe(20.00); // $15 service fee + $5 SES
     expect(result.savingsAbs).toBeCloseTo(5.00, 2);
     expect(result.savingsPct).toBeCloseTo(14.3, 1);
@@ -397,7 +397,7 @@ describe('Integration tests', () => {
     // Ensure calculations remain precise at high volumes
     const result = comparePricing(2500001, 0.00, 0.10);
 
-    expect(result.freeResendCost).toBe(275.00);  // $0 + $15 + $10 + $250 SES (rounded to nearest cent)
+    expect(result.wakaCost).toBe(275.00);  // $0 + $15 + $10 + $250 SES (rounded to nearest cent)
     expect(result.resendCost).toBeNull();
     expect(result.savingsAbs).toBeNull();
   });

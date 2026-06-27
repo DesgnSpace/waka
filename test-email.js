@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * FreeResend Email Testing Script
+ * Waka Email Testing Script
  *
  * This script tests email sending functionality using both:
  * 1. Direct API calls (curl equivalent)
@@ -9,8 +9,8 @@
  */
 
 const API_BASE_URL = "http://localhost:3000";
-const API_KEY = "rev"; // Replace with your actual API key from FreeResend
-const FROM_EMAIL = "info@freeresend.com"; // Replace with your verified domain
+const API_KEY = "rev"; // Replace with your actual API key from Waka
+const FROM_EMAIL = "info@waka.com"; // Replace with your verified domain
 const TO_EMAIL = "your-email@example.com"; // Replace with your email address
 
 // Test 1: Direct API call
@@ -26,15 +26,15 @@ async function testDirectAPI() {
     body: JSON.stringify({
       from: FROM_EMAIL,
       to: [TO_EMAIL],
-      subject: "🎉 FreeResend Test Email - Direct API",
+      subject: "🎉 Waka Test Email - Direct API",
       html: `
         <h1>Success! 🚀</h1>
-        <p>This email was sent using <strong>FreeResend</strong> via direct API call.</p>
+        <p>This email was sent using <strong>Waka</strong> via direct API call.</p>
         <p>If you received this, your email setup is working perfectly!</p>
         <hr>
         <p><small>Sent at: ${new Date().toISOString()}</small></p>
       `,
-      text: "Success! This email was sent using FreeResend via direct API call.",
+      text: "Success! This email was sent using Waka via direct API call.",
     }),
   });
 
@@ -56,23 +56,23 @@ async function testResendPackage() {
   console.log("🧪 Testing Resend Package Compatibility...\n");
 
   try {
-    // Set environment variable for Resend package to use FreeResend endpoint
+    // Set environment variable for Resend package to use Waka endpoint
     process.env.RESEND_BASE_URL = `${API_BASE_URL}/api`;
 
     // Import Resend package (install with: npm install resend)
     const { Resend } = await import("resend");
 
-    // Initialize Resend with FreeResend - no custom config needed!
+    // Initialize Resend with Waka - no custom config needed!
     const resend = new Resend(API_KEY);
 
     const { data, error } = await resend.emails.send({
       from: FROM_EMAIL,
       to: [TO_EMAIL],
-      subject: "🎉 FreeResend Test Email - Resend Package",
+      subject: "🎉 Waka Test Email - Resend Package",
       html: `
         <h1>Amazing! 🎯</h1>
-        <p>This email was sent using the <strong>Resend package</strong> pointing to <strong>FreeResend</strong>!</p>
-        <p>This proves FreeResend is a true drop-in replacement for Resend! 🔄</p>
+        <p>This email was sent using the <strong>Resend package</strong> pointing to <strong>Waka</strong>!</p>
+        <p>This proves Waka is a true drop-in replacement for Resend! 🔄</p>
         <ul>
           <li>✅ Same API interface</li>
           <li>✅ Same package compatibility</li>
@@ -82,7 +82,7 @@ async function testResendPackage() {
         <hr>
         <p><small>Sent at: ${new Date().toISOString()}</small></p>
       `,
-      text: "Amazing! This email was sent using the Resend package pointing to FreeResend!",
+      text: "Amazing! This email was sent using the Resend package pointing to Waka!",
     });
 
     if (error) {
@@ -134,18 +134,18 @@ async function checkEmailLogs() {
 
 // Main test function
 async function runTests() {
-  console.log("🚀 FreeResend Email Testing\n");
+  console.log("🚀 Waka Email Testing\n");
   console.log("=".repeat(50));
 
   // Validate configuration
   if (API_KEY === "YOUR_API_KEY_HERE") {
     console.log(
-      "❌ Please update API_KEY in this script with your actual API key from FreeResend"
+      "❌ Please update API_KEY in this script with your actual API key from Waka"
     );
     return;
   }
 
-  if (FROM_EMAIL === "test@freeresend.com") {
+  if (FROM_EMAIL === "test@waka.com") {
     console.log("❌ Please update FROM_EMAIL with your verified domain email");
     return;
   }
@@ -167,7 +167,7 @@ async function runTests() {
 
     console.log("🎉 All tests completed!");
     console.log("📧 Check your email inbox for test messages");
-    console.log("📊 Check the Email Logs tab in FreeResend dashboard");
+    console.log("📊 Check the Email Logs tab in Waka dashboard");
   } catch (error) {
     console.log("❌ Test error:", error);
   }

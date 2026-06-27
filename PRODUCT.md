@@ -12,7 +12,7 @@ Developers who self-host email infrastructure. Know Docker and AWS. Want control
 
 Open-source, self-hosted transactional email API that is a drop-in Resend replacement using Amazon SES. Exists to give developers full control over their email infrastructure at AWS-native prices with no vendor lock-in.
 
-Success: a dev can spin up FreeResend with Docker, point their existing Resend SDK at it via one env var, and send email — no code changes, no markup.
+Success: a dev can spin up Waka with Docker, point their existing Resend SDK at it via one env var, and send email — no code changes, no markup.
 
 ## Brand Personality
 

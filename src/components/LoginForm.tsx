@@ -29,7 +29,7 @@ export default function LoginForm() {
   return (
     <div className="flex-1 flex items-center justify-center">
       <div className="w-full max-w-sm">
-        <h1 className="text-xl font-semibold text-center mb-1">FreeResend</h1>
+        <h1 className="text-xl font-semibold text-center mb-1">Waka</h1>
         <p className="text-sm text-center text-[#737373] mb-8">Self-hosted email service</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">

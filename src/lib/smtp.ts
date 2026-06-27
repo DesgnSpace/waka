@@ -59,7 +59,7 @@ function getSmtpServer(region: string): string {
  */
 export async function createSmtpCredentials(domain: string): Promise<SmtpCredentials> {
   const region = process.env.AWS_REGION || "us-east-1";
-  const userName = `freeresend-smtp-${domain.replace(/\./g, "-")}`;
+  const userName = `waka-smtp-${domain.replace(/\./g, "-")}`;
 
   try {
     // Create IAM user
@@ -67,7 +67,7 @@ export async function createSmtpCredentials(domain: string): Promise<SmtpCredent
       UserName: userName,
       Tags: [
         { Key: "Domain", Value: domain },
-        { Key: "Service", Value: "FreeResend" },
+        { Key: "Service", Value: "Waka" },
         { Key: "Purpose", Value: "SMTP" }
       ]
     }));
@@ -115,7 +115,7 @@ export async function createSmtpCredentials(domain: string): Promise<SmtpCredent
  * Delete IAM user and SMTP credentials for a domain
  */
 export async function deleteSmtpCredentials(domain: string): Promise<void> {
-  const userName = `freeresend-smtp-${domain.replace(/\./g, "-")}`;
+  const userName = `waka-smtp-${domain.replace(/\./g, "-")}`;
 
   try {
     // List and delete all access keys

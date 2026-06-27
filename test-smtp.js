@@ -23,8 +23,8 @@ async function sendTestEmail() {
   const info = await transporter.sendMail({
     from: 'noreply@phlauncher.com',
     to: 'your-email@example.com',
-    subject: 'FreeResend SMTP Test - phlauncher.com',
-    text: 'This is a test email sent via SMTP using the generated credentials from FreeResend!',
+    subject: 'Waka SMTP Test - phlauncher.com',
+    text: 'This is a test email sent via SMTP using the generated credentials from Waka!',
     html: `
       <h2>✅ SMTP Test Successful!</h2>
       <p>This email was sent via SMTP using:</p>
@@ -35,7 +35,7 @@ async function sendTestEmail() {
       </ul>
       <p>Your SMTP credentials are working correctly!</p>
       <hr>
-      <p><small>Sent from FreeResend - Self-hosted email service</small></p>
+      <p><small>Sent from Waka - Self-hosted email service</small></p>
     `
   });
 

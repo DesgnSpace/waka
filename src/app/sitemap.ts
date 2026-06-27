@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-const baseUrl = "https://www.freeresend.com";
+const baseUrl = "https://www.waka.com";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();

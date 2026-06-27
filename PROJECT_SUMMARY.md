@@ -1,8 +1,8 @@
-# FreeResend - Project Summary
+# Waka - Project Summary
 
 ## Overview
 
-FreeResend is a complete, self-hosted email service that provides a Resend-compatible API. Built with Next.js, it integrates with Amazon SES for email delivery and optionally with Digital Ocean for automatic DNS management.
+Waka is a complete, self-hosted email service that provides a Resend-compatible API. Built with Next.js, it integrates with Amazon SES for email delivery and optionally with Digital Ocean for automatic DNS management.
 
 ## Architecture
 
@@ -167,12 +167,12 @@ Essential configuration:
 
 ## Resend Compatibility
 
-FreeResend implements the same API contract as Resend:
+Waka implements the same API contract as Resend:
 
 ```javascript
 // Just change the baseURL - everything else works the same
 const resend = new Resend("your-api-key", {
-  baseURL: "https://your-freeresend.com/api",
+  baseURL: "https://your-waka.com/api",
 });
 ```
 

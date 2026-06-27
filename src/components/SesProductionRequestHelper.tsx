@@ -49,7 +49,7 @@ export default function SesProductionRequestHelper() {
           </div>
           <h1 className="text-xl font-bold">SES production request helper</h1>
           <p className="mt-2 text-sm leading-6 text-[#525252]">
-            Draft an Amazon SES production access request from public rollout details before a FreeResend launch.
+            Draft an Amazon SES production access request from public rollout details before a Waka launch.
           </p>
 
           <div className="mt-6 grid gap-4">
@@ -100,7 +100,7 @@ export default function SesProductionRequestHelper() {
             <TextArea
               id="bounceHandling"
               label="Bounce handling"
-              placeholder="SNS webhook into FreeResend bounce handler"
+              placeholder="SNS webhook into Waka bounce handler"
               value={input.bounceHandling}
               onChange={(value) => updateInput("bounceHandling", value)}
             />

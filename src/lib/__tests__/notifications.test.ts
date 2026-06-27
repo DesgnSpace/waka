@@ -13,7 +13,7 @@ describe('Notifications', () => {
     jest.clearAllMocks();
     // Mock environment variables
     process.env.ADMIN_EMAIL = 'admin@test.com';
-    process.env.FROM_EMAIL = 'info@freeresend.com';
+    process.env.FROM_EMAIL = 'info@waka.com';
     process.env.NEXTAUTH_URL = 'http://localhost:3000';
   });
 
@@ -44,7 +44,7 @@ describe('Notifications', () => {
       await sendWaitlistNotification(mockNotificationData);
 
       expect(mockSendEmail).toHaveBeenCalledWith({
-        from: 'FreeResend Notifications <info@freeresend.com>',
+        from: 'Waka Notifications <info@waka.com>',
         to: ['admin@test.com'],
         subject: '🚀 New Waitlist Signup: user@example.com',
         html: expect.stringContaining('user@example.com'),
@@ -114,7 +114,7 @@ describe('Notifications', () => {
       await sendWaitlistNotification(mockNotificationData);
 
       const emailCall = mockSendEmail.mock.calls[0][0];
-      expect(emailCall.from).toBe('FreeResend Notifications <info@freeresend.com>');
+      expect(emailCall.from).toBe('Waka Notifications <info@waka.com>');
     });
 
     it('uses configured FROM_EMAIL when available', async () => {
@@ -124,7 +124,7 @@ describe('Notifications', () => {
       await sendWaitlistNotification(mockNotificationData);
 
       const emailCall = mockSendEmail.mock.calls[0][0];
-      expect(emailCall.from).toBe('FreeResend Notifications <custom@example.com>');
+      expect(emailCall.from).toBe('Waka Notifications <custom@example.com>');
     });
   });
 
@@ -135,11 +135,11 @@ describe('Notifications', () => {
       await sendWelcomeEmail('user@example.com', 'signup-id-456');
 
       expect(mockSendEmail).toHaveBeenCalledWith({
-        from: 'FreeResend <info@freeresend.com>',
+        from: 'Waka <info@waka.com>',
         to: ['user@example.com'],
-        subject: 'Welcome to the FreeResend Waitlist! 🚀',
+        subject: 'Welcome to the Waka Waitlist! 🚀',
         html: expect.stringContaining('You\'re on the waitlist!'),
-        text: expect.stringContaining('You\'re on the FreeResend waitlist!'),
+        text: expect.stringContaining('You\'re on the Waka waitlist!'),
         tags: {
           type: 'waitlist_welcome',
           signup_id: 'signup-id-456',
@@ -170,7 +170,7 @@ describe('Notifications', () => {
       await sendWelcomeEmail('user@example.com', 'signup-id-456');
 
       const emailCall = mockSendEmail.mock.calls[0][0];
-      expect(emailCall.from).toBe('FreeResend <welcome@example.com>');
+      expect(emailCall.from).toBe('Waka <welcome@example.com>');
     });
   });
 

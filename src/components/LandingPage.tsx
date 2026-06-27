@@ -8,10 +8,10 @@ export default function LandingPage() {
     <div className="min-h-screen flex flex-col">
       <header className="border-b border-[#e5e5e5]">
         <div className="mx-auto max-w-5xl px-6 h-14 flex items-center justify-between">
-          <span className="font-semibold text-sm">FreeResend</span>
+          <span className="font-semibold text-sm">Waka</span>
           <div className="flex items-center gap-5 text-sm">
             <a
-              href="https://github.com/eibrahim/freeresend"
+              href="https://github.com/eibrahim/waka"
               target="_blank"
               rel="noopener noreferrer"
               className="text-[#525252] hover:text-[#171717]"
@@ -39,7 +39,7 @@ export default function LandingPage() {
 
         <div className="mt-8 flex flex-col sm:flex-row gap-3">
           <a
-            href="https://github.com/eibrahim/freeresend"
+            href="https://github.com/eibrahim/waka"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#171717] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#404040] transition-colors"
@@ -100,12 +100,12 @@ export default function LandingPage() {
         <div className="mt-16">
           <h2 className="text-sm font-semibold text-[#171717] mb-3">Quick start</h2>
           <pre className="bg-[#171717] text-[#a3e635] p-4 rounded-lg text-sm overflow-x-auto leading-6 font-mono">
-            <span className="text-[#737373]"># Set your FreeResend instance URL</span>{"\n"}
+            <span className="text-[#737373]"># Set your Waka instance URL</span>{"\n"}
             export RESEND_BASE_URL=&quot;https://email.example.com/api&quot;
             {"\n\n"}
             <span className="text-[#737373]"># Use Resend SDK as usual</span>{"\n"}
             import &#123; Resend &#125; from &quot;resend&quot;{"\n"}
-            const resend = new Resend(&quot;frs_your-api-key&quot;){"\n\n"}
+            const resend = new Resend(&quot;wka_your-api-key&quot;){"\n\n"}
             await resend.emails.send(&#123;{"\n"}
             &nbsp;&nbsp;from: &quot;hello@example.com&quot;,{"\n"}
             &nbsp;&nbsp;to: [&quot;user@email.com&quot;],{"\n"}
@@ -117,7 +117,7 @@ export default function LandingPage() {
       </main>
 
       <footer className="border-t border-[#e5e5e5] py-6 text-center text-xs text-[#a3a3a3]">
-        MIT Licensed &middot; FreeResend
+        MIT Licensed &middot; Waka
       </footer>
     </div>
   );

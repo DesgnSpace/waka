@@ -1,14 +1,14 @@
 #!/bin/bash
 
-# FreeResend Email Testing with cURL
+# Waka Email Testing with cURL
 # Replace these variables with your actual values
 
-API_KEY=""  # Get from FreeResend API Keys tab
-FROM_EMAIL="info@freeresend.com"  # Your verified domain email
+API_KEY=""  # Get from Waka API Keys tab
+FROM_EMAIL="info@waka.com"  # Your verified domain email
 TO_EMAIL="your-email@example.com"  # Your email address
 BASE_URL="http://localhost:3000"
 
-echo "🚀 Testing FreeResend with cURL"
+echo "🚀 Testing Waka with cURL"
 echo "================================"
 
 # Test 1: Send a simple email
@@ -20,9 +20,9 @@ curl -X POST "$BASE_URL/api/emails" \
   -d "{
     \"from\": \"$FROM_EMAIL\",
     \"to\": [\"$TO_EMAIL\"],
-    \"subject\": \"🧪 FreeResend cURL Test\",
-    \"html\": \"<h1>Success!</h1><p>This email was sent using <strong>FreeResend</strong> via cURL!</p><p>Your email setup is working! 🎉</p>\",
-    \"text\": \"Success! This email was sent using FreeResend via cURL!\"
+    \"subject\": \"🧪 Waka cURL Test\",
+    \"html\": \"<h1>Success!</h1><p>This email was sent using <strong>Waka</strong> via cURL!</p><p>Your email setup is working! 🎉</p>\",
+    \"text\": \"Success! This email was sent using Waka via cURL!\"
   }" | jq '.'
 
 echo ""
@@ -37,4 +37,4 @@ curl -X GET "$BASE_URL/api/emails/logs?limit=3" \
 echo ""
 echo "🎉 Testing complete!"
 echo "📧 Check your email inbox"
-echo "📊 Check FreeResend dashboard for logs"
+echo "📊 Check Waka dashboard for logs"

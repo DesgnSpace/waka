@@ -1,7 +1,7 @@
 version: "3.8"
 
 services:
-  freeresend:
+  waka:
     build: .
     ports:
       - "3000:3000"
@@ -15,8 +15,8 @@ services:
   # postgres:
   #   image: postgres:15-alpine
   #   environment:
-  #     POSTGRES_DB: freeresend
-  #     POSTGRES_USER: freeresend
+  #     POSTGRES_DB: waka
+  #     POSTGRES_USER: waka
   #     POSTGRES_PASSWORD: your-password
   #   volumes:
   #     - postgres_data:/var/lib/postgresql/data

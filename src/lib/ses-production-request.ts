@@ -58,7 +58,7 @@ export function buildSesProductionRequest(input: SesProductionRequestInput): Ses
   const body = [
     "Hello AWS SES team,",
     "",
-    "I'm requesting production access for Amazon SES so this account can send transactional email through a self-hosted FreeResend deployment.",
+    "I'm requesting production access for Amazon SES so this account can send transactional email through a self-hosted Waka deployment.",
     "",
     `Sending domain: ${normalized.sendingDomain}`,
     `Website or app URL: ${normalized.websiteUrl}`,

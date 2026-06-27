@@ -1,23 +1,23 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: freeresend
-  namespace: freeresend
+  name: waka
+  namespace: waka
   labels:
-    app: freeresend
+    app: waka
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: freeresend
+      app: waka
   template:
     metadata:
       labels:
-        app: freeresend
+        app: waka
     spec:
       containers:
-        - name: freeresend
-          image: registry.digitalocean.com/curatedletters/freeresend:latest
+        - name: waka
+          image: registry.digitalocean.com/curatedletters/waka:latest
           ports:
             - containerPort: 3000
               name: http
@@ -30,7 +30,7 @@ spec:
               value: "0.0.0.0"
           envFrom:
             - secretRef:
-                name: freeresend-secrets
+                name: waka-secrets
           resources:
             requests:
               cpu: 200m

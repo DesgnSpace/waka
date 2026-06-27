@@ -253,7 +253,7 @@ export async function deleteDomainIdentity(domain: string): Promise<void> {
 }
 
 export async function createConfigurationSet(domain: string): Promise<string> {
-  const configSetName = `freeresend-${domain.replace(/\./g, "-")}`;
+  const configSetName = `waka-${domain.replace(/\./g, "-")}`;
 
   try {
     const command = new CreateConfigurationSetCommand({

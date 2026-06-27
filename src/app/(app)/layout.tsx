@@ -35,7 +35,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen flex">
       <aside className="w-56 flex flex-col py-6 px-5">
         <div className="mb-8">
-          <h1 className="font-semibold text-sm">FreeResend</h1>
+          <h1 className="font-semibold text-sm">Waka</h1>
           <span className="text-xs text-[#a3a3a3]">self-hosted</span>
         </div>
 

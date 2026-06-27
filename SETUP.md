@@ -1,6 +1,6 @@
-# FreeResend Setup Guide
+# Waka Setup Guide
 
-This guide will help you set up FreeResend from scratch.
+This guide will help you set up Waka from scratch.
 
 ## 1. Prerequisites Setup
 
@@ -14,7 +14,7 @@ This guide will help you set up FreeResend from scratch.
    brew services start postgresql
 
    # Create database
-   createdb freeresend
+   createdb waka
    ```
 
 2. **Option B: Hosted PostgreSQL**
@@ -137,7 +137,7 @@ curl -X POST http://localhost:3000/api/emails \
     "from": "test@yourdomain.com",
     "to": ["recipient@example.com"],
     "subject": "Test Email",
-    "html": "<h1>Hello from FreeResend!</h1>"
+    "html": "<h1>Hello from Waka!</h1>"
   }'
 ```
 
@@ -154,10 +154,10 @@ curl -X POST http://localhost:3000/api/emails \
 
 ```bash
 # Build image
-docker build -t freeresend .
+docker build -t waka .
 
 # Run container
-docker run -p 3000:3000 --env-file .env.local freeresend
+docker run -p 3000:3000 --env-file .env.local waka
 ```
 
 ### Option 3: Traditional Server
@@ -229,7 +229,7 @@ Value: v=DMARC1; p=quarantine; rua=mailto:dmarc@yourdomain.com
 
 4. **API key authentication fails**
    - Ensure domain is verified before creating keys
-   - Check API key format: `frs_[id]_[secret]`
+   - Check API key format: `wka_[id]_[secret]`
 
 ## 9. Support
 

@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * limit;
     let domainIds: string[] = [];
 
-    if (authHeader.startsWith("Bearer frs_")) {
+    if (authHeader.startsWith("Bearer wka_")) {
       // API key authentication
       const apiKey = await verifyApiKey(authHeader.substring(7));
       if (!apiKey) {

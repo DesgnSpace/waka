@@ -1,10 +1,10 @@
-# FreeResend
+# Waka
 
 **A self-hosted, open-source alternative to Resend for sending transactional emails.**
 
-FreeResend allows you to host your own email service using Amazon SES and optionally Digital Ocean for DNS management. It provides a Resend-compatible API so you can use it as a drop-in replacement.
+Waka allows you to host your own email service using Amazon SES and optionally Digital Ocean for DNS management. It provides a Resend-compatible API so you can use it as a drop-in replacement.
 
-> **Acknowledgement:** FreeResend was originally created by [Emad Ibrahim](https://github.com/eibrahim). This fork continues the project's mission of providing affordable, self-hosted email infrastructure. Thank you to all the [original contributors](https://github.com/eibrahim/freeresend/graphs/contributors).
+> **Acknowledgement:** Waka was originally created by [Emad Ibrahim](https://github.com/eibrahim). This fork continues the project's mission of providing affordable, self-hosted email infrastructure. Thank you to all the [original contributors](https://github.com/eibrahim/waka/graphs/contributors).
 
 ## Features
 
@@ -35,7 +35,7 @@ FreeResend allows you to host your own email service using Amazon SES and option
 
 ```bash
 git clone <your-repo>
-cd freeresend
+cd waka
 npm install
 ```
 
@@ -123,16 +123,16 @@ If you want automatic DNS record creation:
 2. Add your domains to Digital Ocean's DNS management
 3. Set the `DO_API_TOKEN` environment variable
 
-## Using FreeResend with Resend SDK
+## Using Waka with Resend SDK
 
-FreeResend is **100% compatible** with the [Resend Node.js SDK](https://github.com/resend/resend-node)!
+Waka is **100% compatible** with the [Resend Node.js SDK](https://github.com/resend/resend-node)!
 
 ### Method 1: Environment Variable (Recommended)
 
 Set the `RESEND_BASE_URL` environment variable:
 
 ```bash
-export RESEND_BASE_URL="https://your-freeresend-domain.com/api"
+export RESEND_BASE_URL="https://your-waka-domain.com/api"
 ```
 
 Then use Resend exactly as before:
@@ -140,8 +140,8 @@ Then use Resend exactly as before:
 ```javascript
 import { Resend } from "resend";
 
-// No changes needed - FreeResend API key works with Resend SDK!
-const resend = new Resend("your-freeresend-api-key");
+// No changes needed - Waka API key works with Resend SDK!
+const resend = new Resend("your-waka-api-key");
 
 const { data, error } = await resend.emails.send({
   from: "onboarding@yourdomain.com",
@@ -154,10 +154,10 @@ const { data, error } = await resend.emails.send({
 ### Method 2: Direct API
 
 ```javascript
-const response = await fetch("https://your-freeresend-domain.com/api/emails", {
+const response = await fetch("https://your-waka-domain.com/api/emails", {
   method: "POST",
   headers: {
-    Authorization: "Bearer your-freeresend-api-key",
+    Authorization: "Bearer your-waka-api-key",
     "Content-Type": "application/json",
   },
   body: JSON.stringify({
@@ -201,7 +201,7 @@ const response = await fetch("https://your-freeresend-domain.com/api/emails", {
 
 ## Domain Setup Process
 
-1. **Add domain** in the FreeResend dashboard
+1. **Add domain** in the Waka dashboard
 2. **DNS Records** will be automatically created (if Digital Ocean is configured) or displayed for manual setup:
 
    - **TXT record** - `_amazonses.yourdomain.com` for SES domain verification
@@ -212,7 +212,7 @@ const response = await fetch("https://your-freeresend-domain.com/api/emails", {
 
 3. **Verify domain** - Click "Check Verification" once DNS records are live
 4. **Create API key** - Generate API keys for your verified domain
-5. **Start sending** - Use the API key with FreeResend or Resend SDK
+5. **Start sending** - Use the API key with Waka or Resend SDK
 
 ## Testing Your Setup
 
@@ -229,7 +229,7 @@ npm test
 **Q: Getting "Invalid API key" errors**
 
 - Make sure you copied the **complete API key** from the green success message (not the masked version from the table)
-- API keys have format: `frs_keyId_secretPart` (3 parts separated by underscores)
+- API keys have format: `wka_keyId_secretPart` (3 parts separated by underscores)
 
 **Q: Digital Ocean DNS automation not working**
 
@@ -248,10 +248,10 @@ npm test
 - Make sure your IAM policy includes **DKIM permissions**: `ses:VerifyDomainDkim` and `ses:GetIdentityDkimAttributes`
 - Verify your AWS account is out of SES sandbox mode
 
-**Q: Resend SDK not working with FreeResend**
+**Q: Resend SDK not working with Waka**
 
 - Set environment variable: `export RESEND_BASE_URL="https://your-domain.com/api"`
-- Use FreeResend API key (starts with `frs_`), not Resend API key
+- Use Waka API key (starts with `wka_`), not Resend API key
 
 ## Production Deployment
 
@@ -278,7 +278,7 @@ CMD ["npm", "start"]
 
 ### Vercel Deployment
 
-FreeResend can be deployed on Vercel with some configuration:
+Waka can be deployed on Vercel with some configuration:
 
 1. Connect your GitHub repo to Vercel
 2. Set environment variables in Vercel dashboard
@@ -349,7 +349,7 @@ MIT License - see LICENSE file for details.
 
 ## Support
 
-- **Issues**: Report bugs via [GitHub Issues](https://github.com/eibrahim/freeresend/issues)
+- **Issues**: Report bugs via [GitHub Issues](https://github.com/eibrahim/waka/issues)
 
 ## Roadmap
 

@@ -32,7 +32,7 @@ export async function generateApiKey(
   // Generate a secure API key with prefix
   const keyId = nanoid(8);
   const keySecret = nanoid(32);
-  const apiKey = `frs_${keyId}_${keySecret}`; // frs = FreeResend
+  const apiKey = `wka_${keyId}_${keySecret}`; // frs = Waka
 
   // Hash the key for storage
   const keyHash = await bcrypt.hash(apiKey, 10);
@@ -47,7 +47,7 @@ export async function generateApiKey(
         domainId,
         keyName,
         keyHash,
-        `frs_${keyId}`,
+        `wka_${keyId}`,
         JSON.stringify(permissions),
       ]
     );

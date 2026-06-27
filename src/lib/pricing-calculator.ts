@@ -1,5 +1,5 @@
 /**
- * Pricing Calculator Engine for Resend vs FreeResend comparison
+ * Pricing Calculator Engine for Resend vs Waka comparison
  * 
  * This module provides pure functions for calculating email service costs
  * and comparing pricing between different providers.
@@ -40,8 +40,8 @@ export interface SelfHostedBreakdown {
 
 export interface PricingComparison {
   resendCost: number | null;
-  freeResendCost: number;
-  freeResendBreakdown: SelfHostedBreakdown;
+  wakaCost: number;
+  wakaBreakdown: SelfHostedBreakdown;
   hostedCost: number;
   savingsAbs: number | null;
   savingsPct: number | null;
@@ -68,7 +68,7 @@ const RESEND_TIERS = [
 ];
 
 /**
- * FreeResend hosted version pricing - simple flat fee model
+ * Waka hosted version pricing - simple flat fee model
  * Users pay SES costs directly to Amazon, we only charge service fee
  */
 export const HOSTED_PRICING_TIERS: HostedPricingTier[] = [
@@ -122,7 +122,7 @@ export function getResendCost(volume: number): ResendQuote {
 }
 
 /**
- * Calculate FreeResend self-hosted cost with full breakdown including hosting and maintenance
+ * Calculate Waka self-hosted cost with full breakdown including hosting and maintenance
  * @param volume Monthly email volume
  * @param flatFee Monthly flat fee (default: $0.00 - no platform fee for open source)
  * @param sesRate Cost per 1,000 emails via SES (default: $0.10)
@@ -130,7 +130,7 @@ export function getResendCost(volume: number): ResendQuote {
  * @param maintenanceCost Monthly maintenance cost (default: $10.00)
  * @returns Detailed cost breakdown
  */
-export function getFreeResendCostBreakdown(
+export function getWakaCostBreakdown(
   volume: number, 
   flatFee: number = 0.00, 
   sesRate: number = 0.10,
@@ -160,18 +160,18 @@ export function getFreeResendCostBreakdown(
 }
 
 /**
- * Calculate FreeResend cost using flat fee + SES pricing (legacy function for backward compatibility)
+ * Calculate Waka cost using flat fee + SES pricing (legacy function for backward compatibility)
  * @param volume Monthly email volume
  * @param flatFee Monthly flat fee (default: $0.00 - no platform fee for open source)
  * @param sesRate Cost per 1,000 emails via SES (default: $0.10)
  * @returns Total monthly cost
  */
-export function getFreeResendCost(
+export function getWakaCost(
   volume: number, 
   flatFee: number = 0.00, 
   sesRate: number = 0.10
 ): number {
-  const breakdown = getFreeResendCostBreakdown(volume, flatFee, sesRate);
+  const breakdown = getWakaCostBreakdown(volume, flatFee, sesRate);
   return breakdown.totalCost;
 }
 
@@ -216,15 +216,15 @@ export function getHostedCost(volume: number, tier: HostedPricingTier): HostedQu
  * @param volume Monthly email volume
  * @returns Cost using optimal tier
  */
-export function getFreeResendHostedCost(volume: number): HostedQuote {
+export function getWakaHostedCost(volume: number): HostedQuote {
   const bestTier = getBestHostedTier();
   return getHostedCost(volume, bestTier);
 }
 
 /**
- * Compare pricing between Resend, FreeResend self-hosted, and FreeResend hosted
+ * Compare pricing between Resend, Waka self-hosted, and Waka hosted
  * @param volume Monthly email volume
- * @param flatFee FreeResend self-hosted flat fee (default: $0.00 - no platform fee for open source)
+ * @param flatFee Waka self-hosted flat fee (default: $0.00 - no platform fee for open source)
  * @param sesRate SES rate per 1,000 emails
  * @param hostingCost Monthly hosting cost (default: $15.00)
  * @param maintenanceCost Monthly maintenance cost (default: $10.00)
@@ -238,8 +238,8 @@ export function comparePricing(
   maintenanceCost: number = 10.00
 ): PricingComparison {
   const resendQuote = getResendCost(volume);
-  const freeResendBreakdown = getFreeResendCostBreakdown(volume, flatFee, sesRate, hostingCost, maintenanceCost);
-  const hostedQuote = getFreeResendHostedCost(volume);
+  const wakaBreakdown = getWakaCostBreakdown(volume, flatFee, sesRate, hostingCost, maintenanceCost);
+  const hostedQuote = getWakaHostedCost(volume);
   
   // Hosted total cost = service fee + SES costs (user pays SES directly to Amazon)
   const sesCost = (volume / 1000) * sesRate;
@@ -253,7 +253,7 @@ export function comparePricing(
   // Calculate savings only if Resend has a valid cost
   if (resendQuote.cost !== null && resendQuote.cost > 0) {
     // Self-hosted savings vs Resend
-    savingsAbs = resendQuote.cost - freeResendBreakdown.totalCost;
+    savingsAbs = resendQuote.cost - wakaBreakdown.totalCost;
     savingsPct = (savingsAbs / resendQuote.cost) * 100;
 
     // Hosted savings vs Resend (including SES costs)
@@ -263,8 +263,8 @@ export function comparePricing(
 
   return {
     resendCost: resendQuote.cost,
-    freeResendCost: freeResendBreakdown.totalCost,
-    freeResendBreakdown,
+    wakaCost: wakaBreakdown.totalCost,
+    wakaBreakdown,
     hostedCost: Math.round(hostedTotalCost * 100) / 100,
     savingsAbs,
     savingsPct,
@@ -326,7 +326,7 @@ export function calculateSavings(params: {
 
   return {
     resendCost: comparison.resendCost,
-    freeResendCost: comparison.freeResendCost,
+    wakaCost: comparison.wakaCost,
     hostedCost: comparison.hostedCost,
     savingsAbs: comparison.savingsAbs,
     savingsPct: comparison.savingsPct,

@@ -1,6 +1,6 @@
-# FreeResend Kubernetes Deployment
+# Waka Kubernetes Deployment
 
-Deploy FreeResend to Digital Ocean Kubernetes cluster with domain www.freeresend.com.
+Deploy Waka to Digital Ocean Kubernetes cluster with domain www.waka.com.
 
 ## Prerequisites
 
@@ -9,7 +9,7 @@ Deploy FreeResend to Digital Ocean Kubernetes cluster with domain www.freeresend
 - Docker logged in to Digital Ocean Container Registry
 - cert-manager installed for SSL certificates
 - nginx-ingress-controller installed
-- Domain www.freeresend.com pointing to your cluster
+- Domain www.waka.com pointing to your cluster
 
 ## Quick Deployment
 
@@ -22,8 +22,8 @@ Deploy FreeResend to Digital Ocean Kubernetes cluster with domain www.freeresend
 
 ```bash
 # 1. Build and push Docker image
-docker build -t registry.digitalocean.com/curatedletters/freeresend:latest .
-docker push registry.digitalocean.com/curatedletters/freeresend:latest
+docker build -t registry.digitalocean.com/curatedletters/waka:latest .
+docker push registry.digitalocean.com/curatedletters/waka:latest
 
 # 2. Apply Kubernetes manifests
 kubectl apply -f k8s/namespace.yaml
@@ -38,24 +38,24 @@ kubectl apply -f k8s/ingress.yaml
 kubectl apply -f k8s/hpa.yaml
 
 # 3. Check deployment status
-kubectl get pods -n freeresend
-kubectl get ingress -n freeresend
+kubectl get pods -n waka
+kubectl get ingress -n waka
 ```
 
 ## Configuration Files
 
-- `namespace.yaml` - Creates freeresend namespace
+- `namespace.yaml` - Creates waka namespace
 - `secret.template.yaml` - Template for environment variables and secrets (copy to secret.yaml)
-- `deployment.yaml` - FreeResend application deployment
+- `deployment.yaml` - Waka application deployment
 - `service.yaml` - Internal service for pods
-- `ingress.yaml` - HTTPS ingress for www.freeresend.com
+- `ingress.yaml` - HTTPS ingress for www.waka.com
 - `hpa.yaml` - Horizontal pod autoscaler (2-10 replicas)
 
 ## Environment Variables
 
 Update `secret.yaml` with your actual values:
 
-- `NEXTAUTH_URL` - https://www.freeresend.com
+- `NEXTAUTH_URL` - https://www.waka.com
 - `NEXTAUTH_SECRET` - JWT secret key
 - `DATABASE_URL` - PostgreSQL connection string
 - `AWS_REGION` - AWS SES region
@@ -76,16 +76,16 @@ Update `secret.yaml` with your actual values:
 
 ```bash
 # Check pods
-kubectl get pods -n freeresend
+kubectl get pods -n waka
 
 # Check logs
-kubectl logs -f deployment/freeresend -n freeresend
+kubectl logs -f deployment/waka -n waka
 
 # Check ingress
-kubectl describe ingress freeresend-ingress -n freeresend
+kubectl describe ingress waka-ingress -n waka
 
 # Check HPA status
-kubectl get hpa -n freeresend
+kubectl get hpa -n waka
 ```
 
 ## Scaling
@@ -94,37 +94,37 @@ The HPA automatically scales between 2-10 replicas based on CPU and memory usage
 
 Manual scaling:
 ```bash
-kubectl scale deployment freeresend --replicas=5 -n freeresend
+kubectl scale deployment waka --replicas=5 -n waka
 ```
 
 ## SSL Certificate
 
 The ingress automatically provisions SSL certificates via cert-manager for:
-- www.freeresend.com  
-- freeresend.com
+- www.waka.com  
+- waka.com
 
 ## Troubleshooting
 
 **Pods not starting:**
 ```bash
-kubectl describe pod <pod-name> -n freeresend
-kubectl logs <pod-name> -n freeresend
+kubectl describe pod <pod-name> -n waka
+kubectl logs <pod-name> -n waka
 ```
 
 **SSL certificate issues:**
 ```bash
-kubectl describe certificate freeresend-tls -n freeresend
+kubectl describe certificate waka-tls -n waka
 kubectl describe clusterissuer letsencrypt-prod
 ```
 
 **Ingress not working:**
 ```bash
-kubectl describe ingress freeresend-ingress -n freeresend
+kubectl describe ingress waka-ingress -n waka
 ```
 
 ## Clean Up
 
 ```bash
 # Delete all resources
-kubectl delete namespace freeresend
+kubectl delete namespace waka
 ```

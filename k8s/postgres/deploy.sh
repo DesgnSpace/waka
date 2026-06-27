@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# FreeResend PostgreSQL K8s Deployment Script
+# Waka PostgreSQL K8s Deployment Script
 
 set -e
 
-echo "🚀 FreeResend PostgreSQL Kubernetes Deployment"
+echo "🚀 Waka PostgreSQL Kubernetes Deployment"
 echo "=============================================="
 echo ""
 
@@ -63,7 +63,7 @@ kubectl apply -f 05-service.yaml
 
 echo ""
 echo "⏳ Waiting for PostgreSQL to be ready..."
-kubectl wait --for=condition=ready pod/postgres-0 -n freeresend --timeout=300s
+kubectl wait --for=condition=ready pod/postgres-0 -n waka --timeout=300s
 
 echo ""
 echo "✅ PostgreSQL deployed successfully!"
@@ -71,15 +71,15 @@ echo ""
 
 # Show status
 echo "📊 Current Status:"
-kubectl get all -n freeresend -l app=postgres
+kubectl get all -n waka -l app=postgres
 
 echo ""
 echo "💾 Storage:"
-kubectl get pvc -n freeresend postgres-pvc
+kubectl get pvc -n waka postgres-pvc
 
 echo ""
 echo "🔍 PostgreSQL Pod Logs (last 10 lines):"
-kubectl logs -n freeresend postgres-0 --tail=10
+kubectl logs -n waka postgres-0 --tail=10
 
 echo ""
 echo "✨ Next Steps:"
@@ -87,13 +87,13 @@ echo ""
 echo "1. Update application secret (if not already done):"
 echo "   kubectl apply -f ../secret.yaml"
 echo ""
-echo "2. Restart FreeResend app to use new database:"
-echo "   kubectl rollout restart deployment/freeresend -n freeresend"
+echo "2. Restart Waka app to use new database:"
+echo "   kubectl rollout restart deployment/waka -n waka"
 echo ""
 echo "3. Verify database connection:"
-echo "   kubectl logs -n freeresend deployment/freeresend | grep -i database"
+echo "   kubectl logs -n waka deployment/waka | grep -i database"
 echo ""
 echo "4. Access database directly (optional):"
-echo "   kubectl exec -it -n freeresend postgres-0 -- psql -U freeresend -d freeresend"
+echo "   kubectl exec -it -n waka postgres-0 -- psql -U waka -d waka"
 echo ""
 echo "📚 For more information, see k8s/postgres/README.md"

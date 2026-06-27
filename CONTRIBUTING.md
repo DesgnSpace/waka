@@ -1,6 +1,6 @@
-# Contributing to FreeResend
+# Contributing to Waka
 
-Thank you for your interest in contributing to FreeResend! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to Waka! This document provides guidelines and instructions for contributing.
 
 ## 🚀 Quick Start
 
@@ -8,7 +8,7 @@ Thank you for your interest in contributing to FreeResend! This document provide
 2. **Clone your fork**:
    ```bash
    git clone <your-repo-url>
-   cd freeresend
+   cd waka
    ```
 3. **Install dependencies**:
    ```bash
@@ -38,7 +38,7 @@ When reporting bugs, please include:
 
 - Node.js version:
 - OS:
-- FreeResend version:
+- Waka version:
 
 **Steps to Reproduce:**
 
@@ -230,8 +230,8 @@ Contributors will be:
 - Credited in release notes
 - Recognized in the community
 
-Thank you for helping make FreeResend better! 🚀
+Thank you for helping make Waka better! 🚀
 
 ---
 
-**FreeResend** was originally created by **[Emad Ibrahim](https://github.com/eibrahim)**. This fork continues the project under the MIT license.
+**Waka** was originally created by **[Emad Ibrahim](https://github.com/eibrahim)**. This fork continues the project under the MIT license.

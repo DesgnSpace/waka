@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "FreeResend — Self-hosted transactional email",
+  title: "Waka — Self-hosted transactional email",
   description:
     "Self-hosted transactional email API that works with the Resend SDK and Amazon SES.",
 };

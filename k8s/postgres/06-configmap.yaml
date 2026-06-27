@@ -2,10 +2,10 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: postgres-init
-  namespace: freeresend
+  namespace: waka
 data:
   init.sql: |
-    -- FreeResend Database Schema
+    -- Waka Database Schema
 
     -- Users table
     CREATE TABLE IF NOT EXISTS users (

@@ -1,12 +1,12 @@
 name: ✨ Feature Request
-description: Suggest a new feature or enhancement for FreeResend
+description: Suggest a new feature or enhancement for Waka
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for your interest in improving FreeResend! Please describe your feature request below.
+        Thanks for your interest in improving Waka! Please describe your feature request below.
 
   - type: textarea
     id: problem

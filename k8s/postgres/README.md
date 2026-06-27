@@ -1,6 +1,6 @@
-# PostgreSQL in Kubernetes for FreeResend
+# PostgreSQL in Kubernetes for Waka
 
-This setup deploys PostgreSQL inside your Kubernetes cluster alongside the FreeResend application.
+This setup deploys PostgreSQL inside your Kubernetes cluster alongside the Waka application.
 
 ## Benefits
 
@@ -13,10 +13,10 @@ This setup deploys PostgreSQL inside your Kubernetes cluster alongside the FreeR
 
 ```
 ┌─────────────────────────────────────┐
-│    Kubernetes Cluster (freeresend) │
+│    Kubernetes Cluster (waka) │
 │                                     │
 │  ┌──────────────┐  ┌─────────────┐ │
-│  │  FreeResend  │  │  PostgreSQL │ │
+│  │  Waka  │  │  PostgreSQL │ │
 │  │  App (x2)    │──│  StatefulSet│ │
 │  │              │  │             │ │
 │  └──────────────┘  └─────────────┘ │
@@ -29,7 +29,7 @@ This setup deploys PostgreSQL inside your Kubernetes cluster alongside the FreeR
 
 ## Files Overview
 
-1. **01-namespace.yaml** - Creates `freeresend` namespace
+1. **01-namespace.yaml** - Creates `waka` namespace
 2. **02-secrets.yaml** - Database credentials and app secrets
 3. **03-pvc.yaml** - 10Gi persistent storage for database
 4. **04-statefulset.yaml** - PostgreSQL 16 deployment
@@ -53,17 +53,17 @@ Edit `02-secrets.yaml` and update:
 kubectl apply -f k8s/postgres/
 
 # Watch deployment
-kubectl get pods -n freeresend -w
+kubectl get pods -n waka -w
 
 # Check logs
-kubectl logs -n freeresend postgres-0 -f
+kubectl logs -n waka postgres-0 -f
 ```
 
 ### 3. Verify Database
 
 ```bash
 # Connect to PostgreSQL pod
-kubectl exec -it -n freeresend postgres-0 -- psql -U freeresend -d freeresend
+kubectl exec -it -n waka postgres-0 -- psql -U waka -d waka
 
 # Inside psql, check tables:
 \dt
@@ -76,7 +76,7 @@ kubectl exec -it -n freeresend postgres-0 -- psql -U freeresend -d freeresend
 
 The app deployment in `/k8s/secret.yaml` has already been updated to use:
 ```
-postgresql://freeresend:PASSWORD@postgres-service.freeresend.svc.cluster.local:5432/freeresend
+postgresql://waka:PASSWORD@postgres-service.waka.svc.cluster.local:5432/waka
 ```
 
 ### 5. Deploy/Redeploy App
@@ -86,10 +86,10 @@ postgresql://freeresend:PASSWORD@postgres-service.freeresend.svc.cluster.local:5
 kubectl apply -f k8s/secret.yaml
 
 # Restart app to pick up new DATABASE_URL
-kubectl rollout restart deployment/freeresend -n freeresend
+kubectl rollout restart deployment/waka -n waka
 
 # Watch rollout
-kubectl rollout status deployment/freeresend -n freeresend
+kubectl rollout status deployment/waka -n waka
 ```
 
 ## Database Management
@@ -98,8 +98,8 @@ kubectl rollout status deployment/freeresend -n freeresend
 
 ```bash
 # Create backup
-kubectl exec -n freeresend postgres-0 -- \
-  pg_dump -U freeresend freeresend > backup-$(date +%Y%m%d).sql
+kubectl exec -n waka postgres-0 -- \
+  pg_dump -U waka waka > backup-$(date +%Y%m%d).sql
 
 # Verify backup
 ls -lh backup-*.sql
@@ -109,18 +109,18 @@ ls -lh backup-*.sql
 
 ```bash
 # Restore from backup
-kubectl exec -i -n freeresend postgres-0 -- \
-  psql -U freeresend -d freeresend < backup-20250101.sql
+kubectl exec -i -n waka postgres-0 -- \
+  psql -U waka -d waka < backup-20250101.sql
 ```
 
 ### Access Database
 
 ```bash
 # Port forward to access locally
-kubectl port-forward -n freeresend svc/postgres-service 5432:5432
+kubectl port-forward -n waka svc/postgres-service 5432:5432
 
 # Connect with local psql
-psql postgresql://freeresend:PASSWORD@localhost:5432/freeresend
+psql postgresql://waka:PASSWORD@localhost:5432/waka
 ```
 
 ### Scale Storage (if needed)
@@ -129,7 +129,7 @@ To increase storage from 10Gi:
 
 1. Edit the PVC:
    ```bash
-   kubectl edit pvc postgres-pvc -n freeresend
+   kubectl edit pvc postgres-pvc -n waka
    ```
 
 2. Update the `spec.resources.requests.storage` value
@@ -142,27 +142,27 @@ To increase storage from 10Gi:
 
 ```bash
 # Pod status
-kubectl get statefulset -n freeresend postgres
+kubectl get statefulset -n waka postgres
 
 # Pod details
-kubectl describe pod -n freeresend postgres-0
+kubectl describe pod -n waka postgres-0
 
 # Database logs
-kubectl logs -n freeresend postgres-0 --tail=50
+kubectl logs -n waka postgres-0 --tail=50
 ```
 
 ### Check Connections
 
 ```bash
-kubectl exec -n freeresend postgres-0 -- \
-  psql -U freeresend -d freeresend -c \
-  "SELECT count(*) FROM pg_stat_activity WHERE datname='freeresend';"
+kubectl exec -n waka postgres-0 -- \
+  psql -U waka -d waka -c \
+  "SELECT count(*) FROM pg_stat_activity WHERE datname='waka';"
 ```
 
 ### Check Storage Usage
 
 ```bash
-kubectl exec -n freeresend postgres-0 -- \
+kubectl exec -n waka postgres-0 -- \
   df -h /var/lib/postgresql/data
 ```
 
@@ -172,32 +172,32 @@ kubectl exec -n freeresend postgres-0 -- \
 
 ```bash
 # Check events
-kubectl describe pod -n freeresend postgres-0
+kubectl describe pod -n waka postgres-0
 
 # Check PVC binding
-kubectl get pvc -n freeresend
+kubectl get pvc -n waka
 ```
 
 ### Connection Refused
 
 ```bash
 # Verify service
-kubectl get svc -n freeresend postgres-service
+kubectl get svc -n waka postgres-service
 
 # Test connection from app pod
-kubectl exec -n freeresend deployment/freeresend -- \
-  nc -zv postgres-service.freeresend.svc.cluster.local 5432
+kubectl exec -n waka deployment/waka -- \
+  nc -zv postgres-service.waka.svc.cluster.local 5432
 ```
 
 ### Initialization Failed
 
 ```bash
 # Check init logs
-kubectl logs -n freeresend postgres-0 | grep -A 20 "init"
+kubectl logs -n waka postgres-0 | grep -A 20 "init"
 
 # Manually run init script
-kubectl exec -n freeresend postgres-0 -- \
-  psql -U freeresend -d freeresend -f /docker-entrypoint-initdb.d/init.sql
+kubectl exec -n waka postgres-0 -- \
+  psql -U waka -d waka -f /docker-entrypoint-initdb.d/init.sql
 ```
 
 ## Migration from External Database
@@ -211,15 +211,15 @@ pg_dump YOUR_EXTERNAL_DB > migration-backup.sql
 # 2. Deploy new PostgreSQL in K8s (steps above)
 
 # 3. Restore to new database
-kubectl exec -i -n freeresend postgres-0 -- \
-  psql -U freeresend -d freeresend < migration-backup.sql
+kubectl exec -i -n waka postgres-0 -- \
+  psql -U waka -d waka < migration-backup.sql
 
 # 4. Update app secrets and restart
 kubectl apply -f k8s/secret.yaml
-kubectl rollout restart deployment/freeresend -n freeresend
+kubectl rollout restart deployment/waka -n waka
 
 # 5. Verify app works with new database
-kubectl logs -n freeresend deployment/freeresend
+kubectl logs -n waka deployment/waka
 
 # 6. Once verified, decommission external database
 ```
@@ -255,7 +255,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: postgres-backup
-  namespace: freeresend
+  namespace: waka
 spec:
   schedule: "0 2 * * *"  # Daily at 2 AM
   jobTemplate:
@@ -268,7 +268,7 @@ spec:
             command:
             - /bin/sh
             - -c
-            - pg_dump -U freeresend -h postgres-service freeresend > /backup/backup-$(date +\%Y\%m\%d).sql
+            - pg_dump -U waka -h postgres-service waka > /backup/backup-$(date +\%Y\%m\%d).sql
             volumeMounts:
             - name: backup-storage
               mountPath: /backup

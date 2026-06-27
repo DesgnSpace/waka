@@ -1,4 +1,4 @@
--- FreeResend Database Schema
+-- Waka Database Schema
 
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
@@ -134,7 +134,7 @@ CREATE TRIGGER update_waitlist_signups_updated_at BEFORE UPDATE ON waitlist_sign
 -- Note: Change this password after first login!
 INSERT INTO users (email, password_hash, name) 
 VALUES (
-  'admin@freeresend.com', 
+  'admin@waka.com', 
   '$2b$10$rHOuGCOB2xzvf1YqnHjlUuB9AKnp.xeL0JOV5E7zlM1QIFhW7qYGS', 
   'Admin User'
 ) ON CONFLICT (email) DO NOTHING;
