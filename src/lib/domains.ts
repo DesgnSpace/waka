@@ -457,14 +457,10 @@ export async function updateMailFromDomain(
     );
   }
 
-  // Best-effort SES update (needs ses:SetIdentityMailFromDomain). DNS records are
-  // stored regardless so the dashboard/export always shows what to publish.
-  try {
-    await setMailFromDomain(domain.domain, mailFrom);
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.warn(`SetIdentityMailFromDomain failed for ${domain.domain}: ${msg}`);
-  }
+  // Set it in SES first. If that throws (e.g. missing ses:SetIdentityMailFromDomain),
+  // let it propagate so the caller can surface the real error — never persist a
+  // MAIL FROM that SES doesn't actually have.
+  await setMailFromDomain(domain.domain, mailFrom);
 
   const base = safeParseDNSRecords(domain.dns_records).filter(
     (r) => r.description !== "Custom MAIL FROM (return-path)" && r.description !== "MAIL FROM SPF"

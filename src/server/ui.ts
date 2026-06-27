@@ -73,7 +73,6 @@ const FLASH: Record<string, { kind: "ok" | "err" | "mut"; text: string }> = {
   "domain-required": { kind: "err", text: "Domain is required." },
   "domain-failed": { kind: "err", text: "Could not add that domain." },
   "mailfrom-saved": { kind: "ok", text: "Return-path domain saved — add the new DNS records." },
-  "mailfrom-failed": { kind: "err", text: "Return-path must be a subdomain of this domain." },
 };
 
 function flashFrom(req: Req): string {
@@ -572,8 +571,15 @@ export async function uiSetMailFrom(req: Req): Promise<Response> {
   try {
     await updateMailFromDomain(req.params.id, user.id, mailFrom);
   } catch (err) {
+    // Fail loud: re-render the overview with the real reason (bad subdomain,
+    // missing ses:SetIdentityMailFromDomain permission, SES error, …).
     console.error("set return-path failed:", err);
-    return seeOther(`/ui/domains/${req.params.id}?m=mailfrom-failed`);
+    const domain = await getDomainById(req.params.id);
+    if (!domain || domain.user_id !== user.id) return seeOther("/dashboard");
+    const msg = err instanceof Error ? err.message : "Could not set the return-path domain.";
+    const body = detailHead(domain as DomainRow, "overview") +
+      domainOverview(domain as DomainRow & { dns_records?: DnsRecord[]; mail_from_domain?: string | null }, alert("err", msg));
+    return html(layout(domain.domain, body, user), { status: 400 });
   }
   return seeOther(`/ui/domains/${req.params.id}?m=mailfrom-saved`);
 }
