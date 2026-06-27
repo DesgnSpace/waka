@@ -29,8 +29,6 @@ const server = Bun.serve({
     "/api/emails/:id": methods({ GET: h.getEmail }),
     "/api/webhooks/ses": methods({ POST: snsWebhook }),
     "/api/tools/email-dns-checker": methods({ POST: h.emailDnsChecker }),
-    "/api/waitlist": methods({ POST: h.waitlistSignup, GET: h.waitlistAnalytics }),
-    "/api/waitlist/export": methods({ GET: h.waitlistExport }),
 
     // --- HTMX dashboard (cookie session, same JWT) ---
     "/": { GET: ui.home },
