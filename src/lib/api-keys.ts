@@ -53,7 +53,7 @@ export async function generateApiKey(
     );
 
     if (result.rows.length === 0) {
-      throw new Error("Failed to create API key");
+      throw new Error("Couldn't create API key. Try again.");
     }
 
     const data = result.rows[0];
@@ -64,7 +64,7 @@ export async function generateApiKey(
     };
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to create API key: ${errorMessage}`);
+    throw new Error(`Couldn't create API key: ${errorMessage}`);
   }
 }
 
@@ -141,7 +141,7 @@ export async function getUserApiKeys(userId: string): Promise<ApiKey[]> {
     }));
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to fetch API keys: ${errorMessage}`);
+    throw new Error(`Couldn't fetch API keys: ${errorMessage}`);
   }
 }
 
@@ -160,7 +160,7 @@ export async function getDomainApiKeys(domainId: string): Promise<ApiKey[]> {
     }));
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to fetch domain API keys: ${errorMessage}`);
+    throw new Error(`Couldn't fetch domain API keys: ${errorMessage}`);
   }
 }
 
@@ -175,11 +175,11 @@ export async function deleteApiKey(
     );
 
     if (result.rowCount === 0) {
-      throw new Error("API key not found or access denied");
+      throw new Error("API key not found or you don't have access.");
     }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to delete API key: ${errorMessage}`);
+    throw new Error(`Couldn't delete API key: ${errorMessage}`);
   }
 }
 
@@ -195,11 +195,11 @@ export async function updateApiKeyPermissions(
     );
 
     if (result.rowCount === 0) {
-      throw new Error("API key not found or access denied");
+      throw new Error("API key not found or you don't have access.");
     }
   } catch (error: unknown) {
     const errorObj = error as { message?: string };
-    throw new Error(`Failed to update API key permissions: ${errorObj.message}`);
+    throw new Error(`Couldn't update API key permissions: ${errorObj.message}`);
   }
 }
 

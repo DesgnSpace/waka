@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { useToast } from "@/contexts/ToastContext";
 
 interface EmailLog {
   id: string;
@@ -48,6 +49,7 @@ export default function EmailLogsTab() {
     page: 1,
     limit: 50,
   });
+  const { toast } = useToast();
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 50,
@@ -59,8 +61,8 @@ export default function EmailLogsTab() {
     try {
       const response = await api.getDomains();
       setDomains(response.data.domains);
-    } catch (error) {
-      console.error("Failed to load domains:", error);
+    } catch {
+      toast("Couldn't load domains.", "error");
     }
   };
 
@@ -73,8 +75,8 @@ export default function EmailLogsTab() {
       const response = await api.getEmailLogs(params);
       setEmails(response.data.emails);
       setPagination(response.data.pagination);
-    } catch (error) {
-      console.error("Failed to load emails:", error);
+    } catch {
+      toast("Couldn't load email logs. Try again.", "error");
     } finally {
       setLoading(false);
     }
@@ -94,7 +96,7 @@ export default function EmailLogsTab() {
       setSelectedEmail(response.data.email);
     } catch (error: unknown) {
       const errorObj = error as { message?: string };
-      alert(errorObj.message || "Failed to load email details");
+      toast(errorObj.message || "Couldn't load email details. Try again.", "error");
     }
   };
 
@@ -111,7 +113,7 @@ export default function EmailLogsTab() {
       <div>
         <h2 className="text-lg font-semibold">Email Logs</h2>
         <p className="text-sm text-[#737373] mt-1">
-          View and monitor all emails sent through your FreeResend instance.
+          Track sends, deliveries, bounces, and complaints.
         </p>
       </div>
 
@@ -162,7 +164,7 @@ export default function EmailLogsTab() {
 
           <div>
             <label htmlFor="limit-filter" className="text-xs font-medium text-[#525252]">
-              Per Page
+              Per page
             </label>
             <select
               id="limit-filter"
@@ -188,7 +190,7 @@ export default function EmailLogsTab() {
       <div className="border border-[#e5e5e5] rounded-lg overflow-hidden">
         {emails.length === 0 ? (
           <p className="text-sm text-[#a3a3a3] p-5 text-center">
-            No emails found. Start sending emails to see them here.
+            No emails yet. Send your first email to see it here.
           </p>
         ) : (
           <>
@@ -203,7 +205,7 @@ export default function EmailLogsTab() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
                           <p className="text-sm font-medium truncate">
-                            {email.subject || "(No subject)"}
+                            {email.subject || "(no subject)"}
                           </p>
                           <span className={`text-xs font-medium uppercase ml-3 ${statusColor[email.status] || ""}`}>
                             {email.status}
@@ -261,7 +263,7 @@ export default function EmailLogsTab() {
         <div className="fixed inset-0 bg-black/20 z-50 flex items-start justify-center pt-16">
           <div className="bg-white border border-[#e5e5e5] rounded-lg w-full max-w-4xl mx-4">
             <div className="p-5">
-              <h3 className="text-base font-semibold mb-4">Email Details</h3>
+              <h3 className="text-base font-semibold mb-4">Email details</h3>
 
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4 text-sm">
@@ -293,9 +295,9 @@ export default function EmailLogsTab() {
 
                 <div>
                   <span className="text-xs text-[#737373]">Subject</span>
-                  <div className="mt-0.5 text-sm">
-                    {selectedEmail.subject || "(No subject)"}
-                  </div>
+                    <div className="mt-0.5 text-sm">
+                      {selectedEmail.subject || "(no subject)"}
+                    </div>
                 </div>
 
                 {selectedEmail.html_content && (

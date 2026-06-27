@@ -71,7 +71,7 @@ async function fetchCert(certUrl: string): Promise<string> {
 
   const res = await fetch(certUrl);
   if (!res.ok) {
-    throw new Error(`Failed to fetch SNS signing cert: ${res.status}`);
+    throw new Error(`Couldn't fetch SNS signing certificate: ${res.status}`);
   }
   const pem = await res.text();
   certCache.set(certUrl, pem);

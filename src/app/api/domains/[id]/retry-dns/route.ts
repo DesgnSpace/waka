@@ -51,7 +51,7 @@ export async function POST(
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return cors(
         NextResponse.json(
-          { error: "Missing or invalid authorization header" },
+          { error: "Sign in again to continue." },
           { status: 401 }
         )
       );
@@ -62,7 +62,7 @@ export async function POST(
     if (!user) {
       return cors(
         NextResponse.json(
-          { error: "Invalid or expired token" },
+          { error: "Your session expired. Sign in again." },
           { status: 401 }
         )
       );
@@ -73,7 +73,7 @@ export async function POST(
 
     if (!domain || domain.user_id !== user.id) {
       return cors(
-        NextResponse.json({ error: "Domain not found" }, { status: 404 })
+        NextResponse.json({ error: "Domain not found." }, { status: 404 })
       );
     }
 
@@ -152,7 +152,7 @@ export async function POST(
   } catch (error) {
     console.error("API Error:", error);
     return cors(
-      NextResponse.json({ error: "Internal server error" }, { status: 500 })
+      NextResponse.json({ error: "Something went wrong. Try again in a moment." }, { status: 500 })
     );
   }
 }

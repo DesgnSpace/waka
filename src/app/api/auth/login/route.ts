@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     const user = await authenticateUser(email, password);
     if (!user) {
       return cors(NextResponse.json(
-        { error: "Invalid email or password" },
+        { error: "Email or password is incorrect." },
         { status: 401 }
       ));
     }
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
 
     console.error("API Error:", error);
     return cors(NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Something went wrong. Try again in a moment." },
       { status: 500 }
     ));
   }

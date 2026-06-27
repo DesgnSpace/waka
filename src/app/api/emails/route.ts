@@ -16,7 +16,7 @@ const attachmentSchema = z.object({
   content: z
     .string()
     .refine((c) => /^[A-Za-z0-9+/]+={0,2}$/.test(c.replace(/\s+/g, "")), {
-      message: "content must be base64",
+      message: "Attachment content must be base64-encoded.",
     }),
   contentType: z.string().regex(/^[^\r\n]+$/, "Invalid content type").optional(),
 });
@@ -40,7 +40,7 @@ const sendEmailSchema = z
     tags: z.record(z.string(), z.string()).optional(),
   })
   .refine((data) => data.html || data.text, {
-    message: "Either html or text content is required",
+    message: "Include either html or text content.",
   })
   .refine(
     (data) =>
@@ -48,7 +48,7 @@ const sendEmailSchema = z
         (sum, a) => sum + decodedBase64Bytes(a.content),
         0
       ) <= MAX_TOTAL_ATTACHMENT_BYTES,
-    { message: "Attachments exceed the 10MB total limit" }
+    { message: "Attachments must be 10 MB or smaller in total." }
   );
 
 function cors(response: NextResponse) {
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     const authHeader = request.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return cors(NextResponse.json(
-        { error: "Missing authorization header" },
+        { error: "Include an API key in the Authorization header." },
         { status: 401 }
       ));
     }
@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
     const apiKey = await verifyApiKey(apiKeyValue);
     if (!apiKey) {
       return cors(NextResponse.json(
-        { error: "Invalid API key" },
+        { error: "API key is invalid or revoked." },
         { status: 401 }
       ));
     }
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     // Authorize before doing any work.
     if (!apiKey.permissions.includes("send")) {
       return cors(NextResponse.json(
-        { error: "API key does not have send permission" },
+        { error: "This API key can't send email. Create a key with send permission." },
         { status: 403 }
       ));
     }
@@ -111,12 +111,12 @@ export async function POST(request: NextRequest) {
     // Verify the from domain is authorized for this API key
     const domain = await getDomainById(apiKey.domain_id);
     if (!domain) {
-      return cors(NextResponse.json({ error: "Domain not found" }, { status: 404 }));
+      return cors(NextResponse.json({ error: "Domain not found." }, { status: 404 }));
     }
 
     if (domain.status !== "verified") {
       return cors(NextResponse.json(
-        { error: "Domain not verified" },
+        { error: "Domain isn't verified. Verify DNS and try again." },
         { status: 400 }
       ));
     }
@@ -203,7 +203,7 @@ export async function POST(request: NextRequest) {
 
     console.error("API Error:", error);
     return cors(NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Something went wrong. Try again in a moment." },
       { status: 500 }
     ));
   }

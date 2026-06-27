@@ -83,7 +83,7 @@ export async function addDomain(
 ): Promise<DomainSetupResult> {
   // Validate domain format
   if (!isValidDomain(domainName)) {
-    throw new Error("Invalid domain format");
+    throw new Error("Enter a valid domain such as example.com.");
   }
 
   // Check if domain already exists in our database
@@ -109,7 +109,7 @@ export async function addDomain(
         error instanceof Error ? error.message : String(error);
       console.warn(`DKIM setup failed for ${domainName}:`, errorMessage);
       console.warn(
-        "Continuing without DKIM (you can set it up manually in AWS SES console)"
+        "Continuing without DKIM. You can set it up manually in the AWS SES console."
       );
     }
 
@@ -133,14 +133,14 @@ export async function addDomain(
         const doRecords = await setupDomainDNS(domainName, dnsRecords);
         digitalOceanRecords = doRecords.map(convertDORecordToDNSRecord);
         setupInstructions =
-          "DNS records have been automatically created in Digital Ocean.";
+          "DNS records created in DigitalOcean.";
       } else {
-        setupInstructions = `Domain not found in Digital Ocean. Please create the DNS records manually or add the domain to your Digital Ocean account first.`;
+        setupInstructions = `Domain not found in DigitalOcean. Add the domain there first, or create the DNS records manually.`;
       }
     } catch (error: unknown) {
       console.warn("Digital Ocean setup failed:", error);
       setupInstructions =
-        "DNS records need to be created manually. Please add the following records to your DNS provider:";
+        "Create these DNS records manually at your DNS provider:";
     }
 
     // 6. Store domain information in database
@@ -159,7 +159,7 @@ export async function addDomain(
     );
 
     if (result.rows.length === 0) {
-      throw new Error("Failed to create domain record");
+      throw new Error("Couldn't save domain. Try again.");
     }
 
     const domain = {
@@ -176,7 +176,7 @@ export async function addDomain(
     };
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to add domain: ${errorMessage}`);
+    throw new Error(`Couldn't add domain: ${errorMessage}`);
   }
 }
 
@@ -186,7 +186,7 @@ async function verifyAndCompleteExistingDomain(
 ): Promise<DomainSetupResult> {
   // Check ownership
   if (existingDomain.user_id !== userId) {
-    throw new Error("Domain belongs to another user");
+    throw new Error("This domain is already registered to another account.");
   }
 
   const domainName = existingDomain.domain;
@@ -287,23 +287,23 @@ async function verifyAndCompleteExistingDomain(
           const doRecords = await setupDomainDNS(domainName, dnsRecords);
           digitalOceanRecords = doRecords.map(convertDORecordToDNSRecord);
           setupInstructions =
-            "DNS records have been verified/updated in Digital Ocean.";
+            "DNS records verified and updated in DigitalOcean.";
         } catch (dnsError: unknown) {
           const dnsErrorMessage =
             dnsError instanceof Error ? dnsError.message : String(dnsError);
           console.warn(`DNS setup failed: ${dnsErrorMessage}`);
           setupInstructions =
-            "DNS records need to be updated manually in Digital Ocean.";
+            "Update these DNS records manually in DigitalOcean.";
         }
       } else {
-        setupInstructions = `Domain not found in Digital Ocean. Please add the domain to your Digital Ocean account or create DNS records manually.`;
+        setupInstructions = `Domain not found in DigitalOcean. Add the domain there first, or create the DNS records manually.`;
       }
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       console.warn(`Digital Ocean check failed: ${errorMessage}`);
       setupInstructions =
-        "Unable to verify Digital Ocean setup. Please check DNS records manually.";
+        "Couldn't verify DigitalOcean setup. Check the DNS records manually.";
     }
 
     // 6. Update database if needed
@@ -337,7 +337,7 @@ async function verifyAndCompleteExistingDomain(
           dnsRecords,
           sesConfigurationSet: configurationSet,
           digitalOceanRecords,
-          setupInstructions: `Domain already exists. ${setupInstructions}`,
+      setupInstructions: `${setupInstructions}`,
         };
       }
     }
@@ -352,7 +352,7 @@ async function verifyAndCompleteExistingDomain(
     };
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to verify existing domain setup: ${errorMessage}`);
+    throw new Error(`Couldn't verify existing domain setup: ${errorMessage}`);
   }
 }
 
@@ -431,11 +431,11 @@ export async function updateDomainStatus(
     ]);
 
     if (result.rowCount === 0) {
-      throw new Error("Domain not found");
+      throw new Error("Domain not found.");
     }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to update domain status: ${errorMessage}`);
+    throw new Error(`Couldn't update domain status: ${errorMessage}`);
   }
 }
 
@@ -444,7 +444,7 @@ export async function checkDomainVerification(
 ): Promise<Domain["status"]> {
   const domain = await getDomainById(domainId);
   if (!domain) {
-    throw new Error("Domain not found");
+    throw new Error("Domain not found.");
   }
 
   try {
@@ -474,7 +474,7 @@ export async function deleteDomain(
 ): Promise<void> {
   const domain = await getDomainById(domainId);
   if (!domain || domain.user_id !== userId) {
-    throw new Error("Domain not found or unauthorized");
+    throw new Error("Domain not found or you don't have access.");
   }
 
   try {
@@ -491,11 +491,11 @@ export async function deleteDomain(
     );
 
     if (result.rowCount === 0) {
-      throw new Error("Domain not found or unauthorized");
+      throw new Error("Domain not found or you don't have access.");
     }
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to delete domain: ${errorMessage}`);
+    throw new Error(`Couldn't delete domain: ${errorMessage}`);
   }
 }
 

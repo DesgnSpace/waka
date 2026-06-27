@@ -23,7 +23,7 @@ export async function GET(
     const authHeader = request.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return cors(NextResponse.json(
-        { error: "Missing or invalid authorization header" },
+        { error: "Sign in again to continue." },
         { status: 401 }
       ));
     }
@@ -32,7 +32,7 @@ export async function GET(
     const user = verifyJWT(token);
     if (!user) {
       return cors(NextResponse.json(
-        { error: "Invalid or expired token" },
+        { error: "Your session expired. Sign in again." },
         { status: 401 }
       ));
     }
@@ -41,7 +41,7 @@ export async function GET(
     const domain = await getDomainById(id);
 
     if (!domain || domain.user_id !== user.id) {
-      return cors(NextResponse.json({ error: "Domain not found" }, { status: 404 }));
+      return cors(NextResponse.json({ error: "Domain not found." }, { status: 404 }));
     }
 
     return cors(NextResponse.json({
@@ -51,7 +51,7 @@ export async function GET(
   } catch (error) {
     console.error("API Error:", error);
     return cors(NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Something went wrong. Try again in a moment." },
       { status: 500 }
     ));
   }
@@ -71,7 +71,7 @@ export async function DELETE(
     const authHeader = request.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return cors(NextResponse.json(
-        { error: "Missing or invalid authorization header" },
+        { error: "Sign in again to continue." },
         { status: 401 }
       ));
     }
@@ -80,7 +80,7 @@ export async function DELETE(
     const user = verifyJWT(token);
     if (!user) {
       return cors(NextResponse.json(
-        { error: "Invalid or expired token" },
+        { error: "Your session expired. Sign in again." },
         { status: 401 }
       ));
     }
@@ -90,12 +90,12 @@ export async function DELETE(
 
     return cors(NextResponse.json({
       success: true,
-      message: "Domain deleted successfully",
+      message: "Domain deleted.",
     }));
   } catch (error) {
     console.error("API Error:", error);
     return cors(NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Something went wrong. Try again in a moment." },
       { status: 500 }
     ));
   }

@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "FreeResend SES Production Readiness Guide",
+  title: "FreeResend SES production readiness guide",
   description:
     "A practical SES, DNS, webhook, monitoring, and rollback checklist for teams preparing a FreeResend deployment for production email.",
 };

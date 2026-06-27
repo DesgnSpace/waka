@@ -49,14 +49,14 @@ async function handleSESWebhook(req: NextRequest) {
     const valid = await validateSnsMessage(body);
     if (!valid) {
       console.warn("Rejected SNS message with invalid signature");
-      return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
+      return NextResponse.json({ error: "Webhook signature is invalid." }, { status: 403 });
     }
 
     // Optionally pin to a specific topic (set SES_SNS_TOPIC_ARN to enable).
     const expectedTopic = process.env.SES_SNS_TOPIC_ARN;
     if (expectedTopic && body.TopicArn !== expectedTopic) {
       console.warn(`Rejected SNS message from unexpected topic: ${body.TopicArn}`);
-      return NextResponse.json({ error: "Unexpected topic" }, { status: 403 });
+      return NextResponse.json({ error: "Unexpected webhook topic." }, { status: 403 });
     }
 
     // Auto-confirm subscriptions (signature already verified above).
@@ -70,20 +70,20 @@ async function handleSESWebhook(req: NextRequest) {
 
     if (body.Type === "UnsubscribeConfirmation") {
       console.log(`SNS unsubscribe confirmation for topic ${body.TopicArn}`);
-      return NextResponse.json({ message: "Acknowledged" });
+      return NextResponse.json({ message: "Acknowledged." });
     }
 
     if (body.Type === "Notification") {
       const message: SESMessage = JSON.parse(body.Message);
       await processSESEvent(message);
-      return NextResponse.json({ message: "Event processed" });
+      return NextResponse.json({ message: "Event processed." });
     }
 
-    return NextResponse.json({ message: "Unknown event type" });
+    return NextResponse.json({ message: "Unknown event type." });
   } catch (error) {
     console.error("SES webhook error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Something went wrong. Try again in a moment." },
       { status: 500 }
     );
   }
@@ -191,7 +191,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("API Error:", error);
     return cors(NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Something went wrong. Try again in a moment." },
       { status: 500 }
     ));
   }

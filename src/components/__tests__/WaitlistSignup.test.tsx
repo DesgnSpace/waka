@@ -229,7 +229,7 @@ describe("WaitlistSignup Component", () => {
       await user.click(submitButton);
 
       await waitFor(() => {
-        expect(screen.getByText(/email already registered for waitlist/i)).toBeInTheDocument();
+        expect(screen.getByText(/already on the waitlist/i)).toBeInTheDocument();
       });
     });
 

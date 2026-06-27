@@ -49,7 +49,7 @@ export default function SesProductionRequestHelper() {
           </div>
           <h1 className="text-xl font-bold">SES production request helper</h1>
           <p className="mt-2 text-sm leading-6 text-[#525252]">
-            Draft the Amazon SES production access request from public rollout details before a FreeResend launch.
+            Draft an Amazon SES production access request from public rollout details before a FreeResend launch.
           </p>
 
           <div className="mt-6 grid gap-4">
@@ -122,7 +122,7 @@ export default function SesProductionRequestHelper() {
           </button>
 
           <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-            Do not paste AWS keys, SMTP passwords, customer lists, private logs, or customer data into this tool.
+            Don&apos;t paste AWS keys, SMTP passwords, customer lists, private logs, or customer data into this tool.
           </div>
         </form>
 

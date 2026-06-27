@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Breadcrumbs from "@/components/Breadcrumbs";
+import { useToast } from "@/contexts/ToastContext";
 
 interface DNSRecord {
   type: string;
@@ -25,6 +26,7 @@ export default function DNSRecordsPage() {
   const [domain, setDomain] = useState<Domain | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncingToDO, setSyncingToDO] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     const token = localStorage.getItem("auth_token");
@@ -45,8 +47,8 @@ export default function DNSRecordsPage() {
       if (data.success) {
         setDomain(data.data.domain);
       }
-    } catch (err) {
-      console.error("Failed to load domain:", err);
+    } catch {
+      toast("Couldn't load domain. Try again.", "error");
     } finally {
       setLoading(false);
     }
@@ -111,11 +113,11 @@ export default function DNSRecordsPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      alert(data.message);
+      toast(data.message);
       fetchDomain();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to verify domain";
-      alert(msg);
+      const msg = err instanceof Error ? err.message : "Couldn't verify domain. Wait for DNS to propagate, then try again.";
+      toast(msg, "error");
     }
   };
 
@@ -123,7 +125,7 @@ export default function DNSRecordsPage() {
     if (!domain) return;
     if (
       !confirm(
-        "This will create DNS records in your DigitalOcean account. Continue?"
+        "Create these DNS records in your DigitalOcean account?"
       )
     )
       return;
@@ -136,10 +138,10 @@ export default function DNSRecordsPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      alert(`Success: ${data.message}`);
+      toast(data.message);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      alert(`Failed to sync to DigitalOcean: ${msg}`);
+      const msg = err instanceof Error ? err.message : "Something went wrong";
+      toast(`Couldn't sync to DigitalOcean: ${msg}`, "error");
     } finally {
       setSyncingToDO(false);
     }
@@ -166,11 +168,10 @@ export default function DNSRecordsPage() {
       <div className="flex items-start justify-between mb-6">
         <div>
           <h2 className="text-lg font-semibold">
-            DNS Records for {domain.domain}
+            DNS records for {domain.domain}
           </h2>
           <p className="text-sm text-[#737373] mt-1">
-            Add these DNS records to your domain provider to verify ownership and
-            enable email sending.
+            Add these records to your DNS provider to verify the domain and start sending.
           </p>
         </div>
       </div>
@@ -234,7 +235,7 @@ export default function DNSRecordsPage() {
           onClick={handleVerifyDomain}
           className="rounded-lg bg-[#171717] px-4 py-2 text-sm text-white hover:bg-[#404040] transition-colors"
         >
-          Check Verification
+          Check verification
         </button>
       </div>
     </div>

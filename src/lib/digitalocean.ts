@@ -274,7 +274,7 @@ export async function setupDomainDNS(
 
     if (!domainExists) {
       throw new Error(
-        `Domain ${domain} not found in Digital Ocean. Please add it first.`
+        `Domain ${domain} not found in DigitalOcean. Add it there first.`
       );
     }
 
@@ -347,7 +347,7 @@ export async function setupDomainDNS(
     return createdRecords;
   } catch (error: unknown) {
     const errorObj = error as { message?: string };
-    throw new Error(`Failed to setup domain DNS: ${errorObj.message}`);
+    throw new Error(`Couldn't set up domain DNS: ${errorObj.message}`);
   }
 }
 

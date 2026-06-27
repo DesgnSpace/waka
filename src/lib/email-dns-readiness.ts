@@ -103,46 +103,46 @@ export function analyzeEmailDnsRecords(records: EmailDnsRecords): EmailDnsAssess
 
   if (spfRecords.length === 0) {
     checks.push(
-      makeCheck("spf", "SPF", "warn", "No SPF record was found on the sending domain.", [
-        "SPF is not always enough for DMARC alignment, but it helps receivers evaluate allowed senders.",
-        "For Amazon SES custom MAIL FROM setups, confirm the required SPF value from your SES console.",
+      makeCheck("spf", "SPF", "warn", "No SPF record found.", [
+        "SPF isn't required for delivery, but it helps receivers check allowed senders.",
+        "For Amazon SES custom MAIL FROM setups, confirm the required SPF value in your SES console.",
       ], records.spfRecords),
     );
   } else if (spfRecords.length > 1) {
     checks.push(
-      makeCheck("spf", "SPF", "fail", "Multiple SPF records were found.", [
+      makeCheck("spf", "SPF", "fail", "Multiple SPF records found.", [
         "Receivers expect one SPF record. Merge the mechanisms into a single v=spf1 record before launch.",
       ], spfRecords),
     );
   } else {
     const includesSes = /amazonses\.com|amazonses/i.test(spfRecords[0]);
     checks.push(
-      makeCheck("spf", "SPF", includesSes ? "pass" : "info", includesSes ? "SPF is present and mentions Amazon SES." : "SPF is present.", [
+      makeCheck("spf", "SPF", includesSes ? "pass" : "info", includesSes ? "SPF includes Amazon SES." : "SPF record found.", [
         includesSes
-          ? "Confirm the sender domain and MAIL FROM domain match the SES setup you plan to use."
-          : "If SES provides a MAIL FROM SPF value for this domain, add it before production sending.",
+          ? "Confirm the sender domain and MAIL FROM domain match your SES setup."
+          : "If SES gives you a MAIL FROM SPF value, add it before sending production email.",
       ], spfRecords),
     );
   }
 
   if (dmarcRecords.length === 0) {
     checks.push(
-      makeCheck("dmarc", "DMARC", "fail", "No DMARC policy was found at _dmarc.", [
+      makeCheck("dmarc", "DMARC", "fail", "No DMARC policy found at _dmarc.", [
         "Add a DMARC record before production so receivers know how to handle failed authentication.",
       ], records.dmarcRecords),
     );
   } else if (dmarcRecords.length > 1) {
     checks.push(
-      makeCheck("dmarc", "DMARC", "fail", "Multiple DMARC records were found.", [
+      makeCheck("dmarc", "DMARC", "fail", "Multiple DMARC records found.", [
         "Receivers expect one DMARC record. Keep a single v=DMARC1 policy at _dmarc.",
       ], dmarcRecords),
     );
   } else {
     const policy = dmarcRecords[0].match(/;\s*p=([^;\s]+)/i)?.[1]?.toLowerCase();
     checks.push(
-      makeCheck("dmarc", "DMARC", policy === "none" ? "warn" : "pass", policy === "none" ? "DMARC exists but is monitor-only." : "DMARC policy is present.", [
+      makeCheck("dmarc", "DMARC", policy === "none" ? "warn" : "pass", policy === "none" ? "DMARC is monitor-only." : "DMARC policy found.", [
         policy === "none"
-          ? "p=none is fine for rollout monitoring, but plan a move to quarantine or reject after mail flow is stable."
+          ? "p=none is fine for rollout monitoring, but plan to move to quarantine or reject once mail flow is stable."
           : `Current policy is p=${policy ?? "unspecified"}. Confirm this matches your rollout risk tolerance.`,
       ], dmarcRecords),
     );
@@ -150,19 +150,19 @@ export function analyzeEmailDnsRecords(records: EmailDnsRecords): EmailDnsAssess
 
   if (!records.dkimSelector) {
     checks.push(
-      makeCheck("dkim", "DKIM", "info", "No DKIM selector was checked.", [
+      makeCheck("dkim", "DKIM", "info", "No DKIM selector checked.", [
         "Enter one SES DKIM selector to verify the selector._domainkey record before sending production email.",
       ], []),
     );
   } else if (hasDkim) {
     checks.push(
-      makeCheck("dkim", "DKIM", "pass", `DKIM material was found for selector ${records.dkimSelector}.`, [
-        "Confirm this selector is one of the active DKIM tokens shown in Amazon SES for the sending identity.",
+      makeCheck("dkim", "DKIM", "pass", `DKIM record found for selector ${records.dkimSelector}.`, [
+        "Confirm this selector matches one of the active DKIM tokens in Amazon SES for the sending identity.",
       ], [...records.dkimTxtRecords, ...records.dkimCnameRecords]),
     );
   } else {
     checks.push(
-      makeCheck("dkim", "DKIM", "fail", `No DKIM TXT or CNAME record was found for selector ${records.dkimSelector}.`, [
+      makeCheck("dkim", "DKIM", "fail", `No DKIM record found for selector ${records.dkimSelector}.`, [
         `Check ${records.dkimSelector}._domainkey.${records.domain} against the SES DKIM records before launch.`,
       ], []),
     );
@@ -170,13 +170,13 @@ export function analyzeEmailDnsRecords(records: EmailDnsRecords): EmailDnsAssess
 
   if (records.mxRecords.length === 0) {
     checks.push(
-      makeCheck("mx", "MX", "warn", "No MX records were found.", [
+      makeCheck("mx", "MX", "warn", "No MX records found.", [
         "Outbound sending can still work, but missing MX records can break replies, bounces, and some domain checks.",
       ], []),
     );
   } else {
     checks.push(
-      makeCheck("mx", "MX", "pass", "MX records are present.", [
+      makeCheck("mx", "MX", "pass", "MX records found.", [
         "Confirm reply and bounce handling match the mailbox or SES receiving path you intend to use.",
       ], records.mxRecords),
     );
@@ -191,7 +191,7 @@ export function analyzeEmailDnsRecords(records: EmailDnsRecords): EmailDnsAssess
     overallStatus === "fail"
       ? "Fix the failed checks before sending production traffic."
       : overallStatus === "warn"
-        ? "The domain is close, but warning items should be reviewed before launch."
+        ? "The domain is close. Review the warnings before launch."
         : "No blocking DNS issues were detected by this quick check.";
 
   return {

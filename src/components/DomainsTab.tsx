@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useToast } from "@/contexts/ToastContext";
 
 interface Domain {
   id: string;
@@ -32,6 +33,7 @@ export default function DomainsTab() {
   const [showSmtpModal, setShowSmtpModal] = useState<Domain | null>(null);
   const [generatingSmtp, setGeneratingSmtp] = useState(false);
   const [deletingSmtp, setDeletingSmtp] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     loadDomains();
@@ -41,8 +43,8 @@ export default function DomainsTab() {
     try {
       const response = await api.getDomains();
       setDomains(response.data.domains);
-    } catch (error) {
-      console.error("Failed to load domains:", error);
+    } catch {
+      toast("Couldn't load domains. Try refreshing the page.", "error");
     } finally {
       setLoading(false);
     }
@@ -59,7 +61,7 @@ export default function DomainsTab() {
       setNewDomain("");
     } catch (error: unknown) {
       const errorObj = error as { message?: string };
-      alert(errorObj.message || "Failed to add domain");
+      toast(errorObj.message || "Couldn't add domain. Check the domain and try again.", "error");
     } finally {
       setAddingDomain(false);
     }
@@ -69,22 +71,22 @@ export default function DomainsTab() {
     try {
       const response = await api.verifyDomain(domainId);
       await loadDomains();
-      alert(response.message);
+      toast(response.message);
     } catch (error: unknown) {
       const errorObj = error as { message?: string };
-      alert(errorObj.message || "Failed to verify domain");
+      toast(errorObj.message || "Couldn't verify domain. Wait for DNS to propagate, then try again.", "error");
     }
   };
 
   const handleDeleteDomain = async (domainId: string) => {
-    if (!confirm("Are you sure you want to delete this domain?")) return;
+    if (!confirm("Delete this domain? This also removes its API keys and SMTP credentials.")) return;
 
     try {
       await api.deleteDomain(domainId);
       setDomains(domains.filter((d) => d.id !== domainId));
     } catch (error: unknown) {
       const errorObj = error as { message?: string };
-      alert(errorObj.message || "Failed to delete domain");
+      toast(errorObj.message || "Couldn't delete domain. Try again.", "error");
     }
   };
 
@@ -102,7 +104,7 @@ export default function DomainsTab() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to generate SMTP credentials");
+        throw new Error(data.error || "Couldn't generate SMTP credentials. Try again.");
       }
 
       await loadDomains();
@@ -110,17 +112,17 @@ export default function DomainsTab() {
       if (updatedDomain) {
         setShowSmtpModal({ ...updatedDomain, smtp_credentials: data.credentials });
       }
-      alert("SMTP credentials generated successfully!");
+      toast("SMTP credentials generated. Copy the password before closing.");
     } catch (error: unknown) {
       const errorObj = error as { message?: string };
-      alert(errorObj.message || "Failed to generate SMTP credentials");
+      toast(errorObj.message || "Couldn't generate SMTP credentials. Try again.", "error");
     } finally {
       setGeneratingSmtp(false);
     }
   };
 
   const handleDeleteSmtp = async (domainId: string) => {
-    if (!confirm("Are you sure you want to delete these SMTP credentials? This will remove the IAM user from AWS.")) return;
+    if (!confirm("Delete these SMTP credentials? This removes the IAM user from AWS.")) return;
 
     setDeletingSmtp(true);
     try {
@@ -135,15 +137,15 @@ export default function DomainsTab() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to delete SMTP credentials");
+        throw new Error(data.error || "Couldn't delete SMTP credentials. Try again.");
       }
 
       await loadDomains();
       setShowSmtpModal(null);
-      alert("SMTP credentials deleted successfully!");
+      toast("SMTP credentials deleted.");
     } catch (error: unknown) {
       const errorObj = error as { message?: string };
-      alert(errorObj.message || "Failed to delete SMTP credentials");
+      toast(errorObj.message || "Couldn't delete SMTP credentials. Try again.", "error");
     } finally {
       setDeletingSmtp(false);
     }
@@ -166,15 +168,14 @@ export default function DomainsTab() {
       <div>
         <h2 className="text-lg font-semibold">Domains</h2>
         <p className="text-sm text-[#737373] mt-1">
-          Add and manage your email domains. Domains must be verified before
-          you can send emails.
+          Add a domain, publish the DNS records, then verify it to start sending.
         </p>
       </div>
 
       {/* Add Domain Form */}
       <div className="border border-[#e5e5e5] rounded-lg p-5">
-        <div className="text-sm font-medium mb-1">Add new domain</div>
-        <p className="text-xs text-[#737373] mb-3">Enter a domain you want to use for sending emails.</p>
+        <div className="text-sm font-medium mb-1">Add domain</div>
+        <p className="text-xs text-[#737373] mb-3">Use a domain you own, such as example.com.</p>
         <form onSubmit={handleAddDomain} className="flex gap-3">
           <input
             type="text"
@@ -189,7 +190,7 @@ export default function DomainsTab() {
             disabled={addingDomain || !newDomain.trim()}
             className="rounded-lg bg-[#171717] px-4 py-2 text-sm font-medium text-white hover:bg-[#404040] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {addingDomain ? "Adding..." : "Add Domain"}
+            {addingDomain ? "Adding..." : "Add domain"}
           </button>
         </form>
       </div>
@@ -198,7 +199,7 @@ export default function DomainsTab() {
       <div className="border border-[#e5e5e5] rounded-lg overflow-hidden">
         {domains.length === 0 ? (
           <p className="text-sm text-[#a3a3a3] p-5 text-center">
-            No domains added yet. Add your first domain to get started.
+            No domains yet. Add a domain to start sending email.
           </p>
         ) : (
           <ul className="divide-y divide-[#e5e5e5]">
@@ -222,13 +223,13 @@ export default function DomainsTab() {
                         href={`/domains/${domain.id}/dns`}
                         className="text-[#525252] hover:text-[#171717] transition-colors"
                       >
-                        View DNS Records
+                        View DNS records
                       </Link>
                       <button
                         onClick={() => handleVerifyDomain(domain.id)}
                         className="text-[#525252] hover:text-[#171717] transition-colors"
                       >
-                        Check Verification
+                        Check verification
                       </button>
                     </>
                   )}
@@ -271,10 +272,10 @@ export default function DomainsTab() {
           <div className="bg-white border border-[#e5e5e5] rounded-lg w-full max-w-2xl mx-4">
             <div className="p-5">
               <h3 className="text-base font-semibold mb-1">
-                SMTP Credentials for {showSmtpModal.domain}
+                SMTP credentials for {showSmtpModal.domain}
               </h3>
               <p className="text-sm text-[#737373] mb-4">
-                Use these credentials to send emails via SMTP:
+                Use these credentials in any SMTP client.
               </p>
 
               <div className="space-y-4">
@@ -314,7 +315,7 @@ export default function DomainsTab() {
 
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
                   <p className="text-xs text-amber-800">
-                    <strong>Important:</strong> Store these credentials securely. The password cannot be retrieved again once you close this dialog.
+                    <strong>Important:</strong> Copy the password now. It can&apos;t be shown again after you close this dialog.
                   </p>
                 </div>
               </div>
@@ -325,7 +326,7 @@ export default function DomainsTab() {
                   disabled={deletingSmtp}
                   className="rounded-lg border border-red-300 px-4 py-2 text-sm text-red-700 hover:bg-red-50 transition-colors disabled:opacity-50"
                 >
-                  {deletingSmtp ? "Deleting..." : "Delete Credentials"}
+                  {deletingSmtp ? "Deleting..." : "Delete credentials"}
                 </button>
                 <button
                   onClick={() => setShowSmtpModal(null)}

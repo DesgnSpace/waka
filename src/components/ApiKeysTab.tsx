@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
+import { useToast } from "@/contexts/ToastContext";
 
 interface Domain {
   id: string;
@@ -32,6 +33,7 @@ export default function ApiKeysTab() {
     permissions: ["send"],
   });
   const [createdKey, setCreatedKey] = useState<string | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     loadData();
@@ -49,8 +51,8 @@ export default function ApiKeysTab() {
           (d: Domain) => d.status === "verified"
         )
       );
-    } catch (error) {
-      console.error("Failed to load data:", error);
+    } catch {
+      toast("Couldn't load API keys. Try refreshing the page.", "error");
     } finally {
       setLoading(false);
     }
@@ -73,7 +75,7 @@ export default function ApiKeysTab() {
       setShowCreateForm(false);
     } catch (error: unknown) {
       const errorObj = error as { message?: string };
-      alert(errorObj.message || "Failed to create API key");
+      toast(errorObj.message || "Couldn't create API key. Try again.", "error");
     } finally {
       setCreating(false);
     }
@@ -82,7 +84,7 @@ export default function ApiKeysTab() {
   const handleDeleteKey = async (keyId: string) => {
     if (
       !confirm(
-        "Are you sure you want to delete this API key? This action cannot be undone."
+        "Delete this API key? Apps using it will stop sending email immediately."
       )
     )
       return;
@@ -92,7 +94,7 @@ export default function ApiKeysTab() {
       setApiKeys(apiKeys.filter((k) => k.id !== keyId));
     } catch (error: unknown) {
       const errorObj = error as { message?: string };
-      alert(errorObj.message || "Failed to delete API key");
+      toast(errorObj.message || "Couldn't delete API key. Try again.", "error");
     }
   };
 
@@ -108,9 +110,9 @@ export default function ApiKeysTab() {
     <div className="space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-lg font-semibold">API Keys</h2>
+          <h2 className="text-lg font-semibold">API keys</h2>
           <p className="text-sm text-[#737373] mt-1">
-            Create and manage API keys for sending emails through your verified domains.
+            Create keys for each verified domain. Use them with the Resend SDK.
           </p>
         </div>
         <button
@@ -118,14 +120,14 @@ export default function ApiKeysTab() {
           disabled={domains.length === 0}
           className="rounded-lg bg-[#171717] px-4 py-2 text-sm font-medium text-white hover:bg-[#404040] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Create API Key
+          Create API key
         </button>
       </div>
 
       {domains.length === 0 && (
         <div className="border border-amber-200 bg-amber-50 rounded-lg p-4">
           <p className="text-sm text-amber-800">
-            No verified domains. Add and verify at least one domain before creating API keys.
+            Add and verify a domain before you can create API keys.
           </p>
         </div>
       )}
@@ -133,7 +135,7 @@ export default function ApiKeysTab() {
       {/* Create API Key Form */}
       {showCreateForm && domains.length > 0 && (
         <div className="border border-[#e5e5e5] rounded-lg p-5">
-          <h3 className="text-sm font-semibold mb-4">Create new API key</h3>
+          <h3 className="text-sm font-semibold mb-4">Create API key</h3>
           <form onSubmit={handleCreateKey} className="space-y-4">
             <div>
               <label htmlFor="domain" className="text-sm font-medium text-[#171717]">
@@ -148,7 +150,7 @@ export default function ApiKeysTab() {
                 className="mt-1 block w-full max-w-xs rounded-lg border border-[#e5e5e5] px-3 py-2 text-sm text-[#171717] outline-none focus:border-[#171717] transition-colors"
                 required
               >
-                <option value="">Select a domain</option>
+                <option value="">Select domain</option>
                 {domains.map((domain) => (
                   <option key={domain.id} value={domain.id}>
                     {domain.domain}
@@ -168,7 +170,7 @@ export default function ApiKeysTab() {
                 onChange={(e) =>
                   setNewKey({ ...newKey, keyName: e.target.value })
                 }
-                placeholder="e.g., Production Key, Development Key"
+                placeholder="e.g., Production"
                 className="mt-1 block w-full max-w-xs rounded-lg border border-[#e5e5e5] px-3 py-2 text-sm text-[#171717] outline-none focus:border-[#171717] transition-colors"
                 required
               />
@@ -187,7 +189,7 @@ export default function ApiKeysTab() {
                 disabled={creating}
                 className="rounded-lg bg-[#171717] px-4 py-2 text-sm text-white hover:bg-[#404040] transition-colors disabled:opacity-50"
               >
-                {creating ? "Creating..." : "Create Key"}
+                {creating ? "Creating..." : "Create key"}
               </button>
             </div>
           </form>
@@ -198,10 +200,10 @@ export default function ApiKeysTab() {
       {createdKey && (
         <div className="border border-green-200 bg-green-50 rounded-lg p-4">
           <p className="text-sm font-medium text-green-800 mb-1">
-            API Key Created Successfully!
+            API key created
           </p>
           <p className="text-xs text-green-700 mb-2">
-            Save this API key now — it will not be shown again:
+            Copy this key now. It won&apos;t be shown again.
           </p>
           <div className="bg-white border border-green-200 rounded p-3 font-mono text-sm break-all">
             {createdKey}
@@ -209,11 +211,11 @@ export default function ApiKeysTab() {
           <button
             onClick={() => {
               navigator.clipboard.writeText(createdKey);
-              alert("API key copied to clipboard!");
+              toast("API key copied to clipboard!");
             }}
             className="mt-2 text-xs text-green-700 hover:text-green-900"
           >
-            Copy to clipboard
+            Copy
           </button>
           <button
             onClick={() => setCreatedKey(null)}
@@ -228,7 +230,7 @@ export default function ApiKeysTab() {
       <div className="border border-[#e5e5e5] rounded-lg overflow-hidden">
         {apiKeys.length === 0 ? (
           <p className="text-sm text-[#a3a3a3] p-5 text-center">
-            No API keys created yet. Create your first API key to start sending emails.
+            No API keys yet. Create one to start sending email.
           </p>
         ) : (
           <ul className="divide-y divide-[#e5e5e5]">

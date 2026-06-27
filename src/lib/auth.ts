@@ -63,13 +63,13 @@ export async function createUser(
     );
 
     if (result.rows.length === 0) {
-      throw new Error("Failed to create user");
+      throw new Error("Couldn't create user. Try again.");
     }
 
     return result.rows[0];
   } catch (error: unknown) {
     const errorObj = error as { message?: string };
-    throw new Error(`Failed to create user: ${errorObj.message}`);
+    throw new Error(`Couldn't create user: ${errorObj.message}`);
   }
 }
 

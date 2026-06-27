@@ -84,7 +84,7 @@ export async function createSmtpCredentials(domain: string): Promise<SmtpCredent
     }));
 
     if (!accessKeyResponse.AccessKey?.AccessKeyId || !accessKeyResponse.AccessKey?.SecretAccessKey) {
-      throw new Error("Failed to create access key");
+      throw new Error("Couldn't create SMTP credentials. Try again.");
     }
 
     const accessKeyId = accessKeyResponse.AccessKey.AccessKeyId;

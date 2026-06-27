@@ -27,7 +27,7 @@ export async function POST(
     const authHeader = req.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return cors(NextResponse.json(
-        { error: "Missing or invalid authorization header" },
+        { error: "Sign in again to continue." },
         { status: 401 }
       ));
     }
@@ -36,7 +36,7 @@ export async function POST(
     const user = verifyJWT(token);
     if (!user) {
       return cors(NextResponse.json(
-        { error: "Invalid or expired token" },
+        { error: "Your session expired. Sign in again." },
         { status: 401 }
       ));
     }
@@ -49,7 +49,7 @@ export async function POST(
 
     if (domainResult.rows.length === 0) {
       return cors(NextResponse.json(
-        { error: "Domain not found" },
+        { error: "Domain not found." },
         { status: 404 }
       ));
     }
@@ -59,7 +59,7 @@ export async function POST(
     // Check if domain is verified
     if (domain.status !== "verified") {
       return cors(NextResponse.json(
-        { error: "Domain must be verified before creating SMTP credentials" },
+        { error: "Verify the domain before generating SMTP credentials." },
         { status: 400 }
       ));
     }
@@ -68,7 +68,7 @@ export async function POST(
     if (domain.smtp_credentials) {
       return cors(NextResponse.json(
         {
-          error: "SMTP credentials already exist for this domain",
+          error: "SMTP credentials already exist for this domain. Delete the old ones to regenerate.",
           credentials: domain.smtp_credentials
         },
         { status: 400 }
@@ -92,7 +92,7 @@ export async function POST(
     console.error("Error creating SMTP credentials:", error);
     return cors(NextResponse.json(
       {
-        error: "Failed to create SMTP credentials",
+        error: "Couldn't create SMTP credentials. Try again.",
         details: error instanceof Error ? error.message : String(error)
       },
       { status: 500 }
@@ -115,7 +115,7 @@ export async function DELETE(
     const authHeader = req.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return cors(NextResponse.json(
-        { error: "Missing or invalid authorization header" },
+        { error: "Sign in again to continue." },
         { status: 401 }
       ));
     }
@@ -124,7 +124,7 @@ export async function DELETE(
     const user = verifyJWT(token);
     if (!user) {
       return cors(NextResponse.json(
-        { error: "Invalid or expired token" },
+        { error: "Your session expired. Sign in again." },
         { status: 401 }
       ));
     }
@@ -137,7 +137,7 @@ export async function DELETE(
 
     if (domainResult.rows.length === 0) {
       return cors(NextResponse.json(
-        { error: "Domain not found" },
+        { error: "Domain not found." },
         { status: 404 }
       ));
     }
@@ -161,7 +161,7 @@ export async function DELETE(
     console.error("Error deleting SMTP credentials:", error);
     return cors(NextResponse.json(
       {
-        error: "Failed to delete SMTP credentials",
+        error: "Couldn't delete SMTP credentials. Try again.",
         details: error instanceof Error ? error.message : String(error)
       },
       { status: 500 }

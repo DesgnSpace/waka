@@ -58,7 +58,7 @@ export function buildSesProductionRequest(input: SesProductionRequestInput): Ses
   const body = [
     "Hello AWS SES team,",
     "",
-    "I am requesting production access for Amazon SES so this account can send transactional email through a self-hosted FreeResend deployment.",
+    "I'm requesting production access for Amazon SES so this account can send transactional email through a self-hosted FreeResend deployment.",
     "",
     `Sending domain: ${normalized.sendingDomain}`,
     `Website or app URL: ${normalized.websiteUrl}`,
@@ -75,7 +75,7 @@ export function buildSesProductionRequest(input: SesProductionRequestInput): Ses
     "- Mailing lists will not be purchased, scraped, or imported from unverified sources.",
     "- Sending will start at low volume and ramp only after delivery and complaint rates are healthy.",
     "",
-    "I am not including AWS access keys, SMTP passwords, or customer data in this request.",
+    "I'm not including AWS access keys, SMTP passwords, or customer data in this request.",
     "",
     "Thank you.",
   ].join("\n");

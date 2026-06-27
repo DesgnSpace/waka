@@ -109,7 +109,7 @@ export default function EmailDnsChecker() {
       const payload = await response.json();
 
       if (!response.ok) {
-        throw new Error(payload.error ?? "DNS check failed.");
+        throw new Error(payload.error ?? "Couldn't check DNS. Try again.");
       }
 
       setResult(payload as EmailDnsAssessment);
@@ -131,7 +131,7 @@ export default function EmailDnsChecker() {
             Email DNS readiness checker
           </h1>
           <p className="mt-2 text-sm leading-6 text-[#525252]">
-            Check SPF, DMARC, MX, and one DKIM selector before moving a FreeResend or Amazon SES domain into production.
+            Check SPF, DMARC, MX, and one DKIM selector before launching a FreeResend or Amazon SES domain.
           </p>
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
@@ -169,7 +169,7 @@ export default function EmailDnsChecker() {
               className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#171717] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#404040] transition-colors disabled:bg-[#a3a3a3] disabled:cursor-not-allowed"
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              <span>{loading ? "Checking DNS" : "Run DNS check"}</span>
+              <span>{loading ? "Checking DNS..." : "Run DNS check"}</span>
             </button>
           </form>
 

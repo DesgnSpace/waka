@@ -66,7 +66,7 @@ export default function WaitlistSignup({
       if (formState.email && !EMAIL_REGEX.test(formState.email)) {
         setFormState(prev => ({
           ...prev,
-          emailError: "Please enter a valid email address"
+        emailError: "Enter a valid email address"
         }));
       } else {
         setFormState(prev => ({
@@ -123,7 +123,7 @@ export default function WaitlistSignup({
     if (!EMAIL_REGEX.test(formState.email)) {
       setFormState(prev => ({
         ...prev,
-        emailError: "Please enter a valid email address"
+        emailError: "Enter a valid email address"
       }));
       return;
     }
@@ -156,7 +156,7 @@ export default function WaitlistSignup({
       const result: ApiResponse = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.message || "Failed to join waitlist");
+        throw new Error(result.message || "Couldn't join waitlist");
       }
 
       // Success - update state
@@ -170,12 +170,12 @@ export default function WaitlistSignup({
       onSuccess?.();
     } catch (err: unknown) {
       const errorObj = err as { message?: string; name?: string };
-      let errorMessage = "Failed to join waitlist. Please try again.";
+      let errorMessage = "Couldn't join waitlist. Try again.";
 
       if (errorObj.name === "AbortError") {
-        errorMessage = "Request timed out. Please check your connection and try again.";
+        errorMessage = "Request timed out. Check your connection and try again.";
       } else if (errorObj.message?.includes("409")) {
-        errorMessage = "This email is already on our waitlist.";
+        errorMessage = "This email is already on the waitlist.";
       } else if (errorObj.message) {
         errorMessage = errorObj.message;
       }
@@ -196,10 +196,10 @@ export default function WaitlistSignup({
         <div className="text-center">
           <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-gray-900 mb-2">
-            You&apos;re on the waitlist!
+            You&apos;re on the waitlist
           </h3>
           <p className="text-gray-600 mb-4">
-            We&apos;ll notify you when the hosted version becomes available.
+            We&apos;ll email you when the hosted version is available.
           </p>
           {formState.volume && (
             <p className="text-sm text-gray-500">
@@ -217,10 +217,10 @@ export default function WaitlistSignup({
         <div className="text-center mb-6">
           <Mail className="h-8 w-8 text-blue-600 mx-auto mb-3" />
           <h3 className="text-xl font-semibold text-gray-900 mb-2">
-            Join the Waitlist
+            Join the waitlist
           </h3>
           <p className="text-gray-600">
-            Be the first to know when our hosted version launches
+            Get notified when the hosted version launches
           </p>
         </div>
       )}
@@ -229,7 +229,7 @@ export default function WaitlistSignup({
         {/* Email Input with enhanced state management */}
         <div>
           <label htmlFor="waitlist-email" className="block text-sm font-medium text-gray-700 mb-1">
-            Email Address *
+            Email address *
           </label>
           <input
             id="waitlist-email"
@@ -257,7 +257,7 @@ export default function WaitlistSignup({
         {/* Volume Input */}
         <div>
           <label htmlFor="waitlist-volume" className="block text-sm font-medium text-gray-700 mb-1">
-            Expected Monthly Email Volume (optional)
+            Expected monthly email volume (optional)
           </label>
           <input
             id="waitlist-volume"
@@ -272,16 +272,16 @@ export default function WaitlistSignup({
             disabled={formState.loading}
           />
           <p className="mt-1 text-xs text-gray-500">
-            Help us understand your needs better
+            Helps us plan capacity
           </p>
         </div>
 
         {/* Current Provider Input */}
         {!compact && (
           <div>
-            <label htmlFor="waitlist-provider" className="block text-sm font-medium text-gray-700 mb-1">
-              Current Email Provider (optional)
-            </label>
+          <label htmlFor="waitlist-provider" className="block text-sm font-medium text-gray-700 mb-1">
+            Current email provider (optional)
+          </label>
             <input
               id="waitlist-provider"
               type="text"
@@ -333,15 +333,14 @@ export default function WaitlistSignup({
               {formState.optimisticSubmit ? "Joining..." : "Submitting..."}
             </>
           ) : (
-            "Join Waitlist"
+            "Join waitlist"
           )}
         </button>
       </form>
 
       {/* Privacy Note */}
       <p className="mt-4 text-xs text-gray-500 text-center">
-        We&apos;ll only use your email to notify you about the hosted version launch.
-        No spam, unsubscribe anytime.
+        We&apos;ll only email you about the hosted version. No spam, unsubscribe anytime.
       </p>
     </div>
   );

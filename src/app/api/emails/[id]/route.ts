@@ -55,7 +55,7 @@ export async function GET(
     const authHeader = request.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return cors(NextResponse.json(
-        { error: "Missing or invalid authorization header" },
+        { error: "Sign in again to continue." },
         { status: 401 }
       ));
     }
@@ -64,7 +64,7 @@ export async function GET(
     const user = verifyJWT(token);
     if (!user) {
       return cors(NextResponse.json(
-        { error: "Invalid or expired token" },
+        { error: "Your session expired. Sign in again." },
         { status: 401 }
       ));
     }
@@ -86,14 +86,14 @@ export async function GET(
     );
 
     if (emailResult.rows.length === 0) {
-      return cors(NextResponse.json({ error: "Email not found" }, { status: 404 }));
+      return cors(NextResponse.json({ error: "Email not found." }, { status: 404 }));
     }
 
     const emailData = emailResult.rows[0];
 
     // Check if user owns this email log
     if (emailData.domain_user_id !== user.id) {
-      return cors(NextResponse.json({ error: "Email not found" }, { status: 404 }));
+      return cors(NextResponse.json({ error: "Email not found." }, { status: 404 }));
     }
 
     // Get webhook events for this email
@@ -132,7 +132,7 @@ export async function GET(
   } catch (error) {
     console.error("API Error:", error);
     return cors(NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Something went wrong. Try again in a moment." },
       { status: 500 }
     ));
   }

@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (typeof body.domain !== "string") {
-    return NextResponse.json({ error: "Domain is required." }, { status: 400 });
+    return NextResponse.json({ error: "Enter a domain." }, { status: 400 });
   }
 
   try {

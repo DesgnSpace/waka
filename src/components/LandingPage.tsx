@@ -19,7 +19,7 @@ export default function LandingPage() {
               <Github className="h-4 w-4" />
             </a>
             <Link href="/login" className="text-[#525252] hover:text-[#171717]">
-              Login
+              Sign in
             </Link>
           </div>
         </div>
@@ -30,11 +30,11 @@ export default function LandingPage() {
           Self-hosted transactional email API
         </h1>
         <p className="mt-4 text-[#525252] leading-7 max-w-2xl">
-          Drop-in Resend replacement using Amazon SES. Set{" "}
+          Drop-in Resend replacement using Amazon SES. Change{" "}
           <code className="text-sm bg-[#f5f5f5] px-1.5 py-0.5 rounded font-mono">
             RESEND_BASE_URL
           </code>{" "}
-          and your existing Resend SDK code works unchanged.
+          and keep using your existing Resend SDK code.
         </p>
 
         <div className="mt-8 flex flex-col sm:flex-row gap-3">

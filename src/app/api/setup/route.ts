@@ -7,7 +7,7 @@ export async function POST() {
 
     return NextResponse.json({
       success: true,
-      message: "Default user initialized successfully",
+      message: "Default user created.",
     });
   } catch (error: unknown) {
     const errorObj = error as { message?: string };

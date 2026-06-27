@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return cors(NextResponse.json(
-        { error: "Missing authorization header" },
+        { error: "Include an API key in the Authorization header." },
         { status: 401 }
       ));
     }
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
       const apiKey = await verifyApiKey(authHeader.substring(7));
       if (!apiKey) {
         return cors(NextResponse.json(
-          { error: "Invalid API key" },
+          { error: "API key is invalid or revoked." },
           { status: 401 }
         ));
       }
@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
       const user = verifyJWT(authHeader.substring(7));
       if (!user) {
         return cors(NextResponse.json(
-          { error: "Invalid or expired token" },
+          { error: "Your session expired. Sign in again." },
           { status: 401 }
         ));
       }
@@ -167,7 +167,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("API Error:", error);
     return cors(NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Something went wrong. Try again in a moment." },
       { status: 500 }
     ));
   }

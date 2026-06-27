@@ -3,7 +3,7 @@ import Link from "next/link";
 import EmailDnsChecker from "@/components/EmailDnsChecker";
 
 export const metadata: Metadata = {
-  title: "Email DNS Readiness Checker",
+  title: "Email DNS readiness checker",
   description:
     "Check SPF, DMARC, DKIM, and MX records before launching a FreeResend or Amazon SES sending domain.",
 };
@@ -21,7 +21,7 @@ export default function EmailDnsCheckerPage() {
               Guide
             </Link>
             <Link href="/tools/ses-production-request-helper" className="text-gray-600 hover:text-gray-950">
-              SES Request
+              SES request
             </Link>
           </div>
         </nav>

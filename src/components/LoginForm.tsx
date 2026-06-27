@@ -20,7 +20,7 @@ export default function LoginForm() {
       await login(email, password);
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
-      setError(errorObj.message || "Login failed");
+      setError(errorObj.message || "We couldn't sign you in. Check your email and password and try again.");
     } finally {
       setLoading(false);
     }
@@ -30,7 +30,7 @@ export default function LoginForm() {
     <div className="flex-1 flex items-center justify-center">
       <div className="w-full max-w-sm">
         <h1 className="text-xl font-semibold text-center mb-1">FreeResend</h1>
-        <p className="text-sm text-center text-[#737373] mb-8">self-hosted email service</p>
+        <p className="text-sm text-center text-[#737373] mb-8">Self-hosted email service</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -60,7 +60,7 @@ export default function LoginForm() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
+              placeholder="Password"
               className="mt-1 w-full rounded-lg border border-[#e5e5e5] px-3 py-2 text-sm text-[#171717] outline-none focus:border-[#171717] transition-colors"
             />
           </div>

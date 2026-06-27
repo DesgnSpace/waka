@@ -18,7 +18,7 @@ export default function Home() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-sm text-[#737373]">Loading...</p>
+        <p className="text-sm text-[#737373]">Loading dashboard...</p>
       </div>
     );
   }

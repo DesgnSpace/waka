@@ -48,7 +48,7 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(
         {
           success: false,
-          message: "Email already registered for waitlist",
+          message: "This email is already on the waitlist.",
         },
         { status: 409 }
       );
@@ -102,7 +102,7 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(
       {
         success: true,
-        message: "Successfully joined the waitlist!",
+        message: "You're on the waitlist.",
         data: {
           id: signup.id,
           email: signup.email,
@@ -127,7 +127,7 @@ async function handleGet(req: NextRequest): Promise<NextResponse> {
     // Validate pagination parameters
     if (page < 1 || limit < 1 || limit > 1000) {
       return NextResponse.json(
-        { error: "Invalid pagination parameters" },
+        { error: "Invalid pagination parameters." },
         { status: 400 }
       );
     }

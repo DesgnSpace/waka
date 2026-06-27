@@ -36,7 +36,7 @@ describe("SES production request helper", () => {
     expect(request.body).toContain("Use case: Password resets and account notifications");
     expect(request.body).toContain("Bounce handling: SNS webhook into FreeResend bounce handler");
     expect(request.body).toContain("Complaint handling: SNS complaint webhook with suppression");
-    expect(request.body).toContain("I am not including AWS access keys, SMTP passwords, or customer data in this request.");
+    expect(request.body).toContain("I'm not including AWS access keys, SMTP passwords, or customer data in this request.");
     expect(request.body).not.toContain("SECRET_ACCESS_KEY");
   });
 });

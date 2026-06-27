@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     const authHeader = request.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return cors(NextResponse.json(
-        { error: "Missing or invalid authorization header" },
+        { error: "Sign in again to continue." },
         { status: 401 }
       ));
     }
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     const user = verifyJWT(token);
     if (!user) {
       return cors(NextResponse.json(
-        { error: "Invalid or expired token" },
+        { error: "Your session expired. Sign in again." },
         { status: 401 }
       ));
     }
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("API Error:", error);
     return cors(NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Something went wrong. Try again in a moment." },
       { status: 500 }
     ));
   }
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
     const authHeader = request.headers.get("authorization");
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return cors(NextResponse.json(
-        { error: "Missing or invalid authorization header" },
+        { error: "Sign in again to continue." },
         { status: 401 }
       ));
     }
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
     const user = verifyJWT(token);
     if (!user) {
       return cors(NextResponse.json(
-        { error: "Invalid or expired token" },
+        { error: "Your session expired. Sign in again." },
         { status: 401 }
       ));
     }
@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
     return cors(NextResponse.json({
       success: true,
       data: result,
-      message: "Domain added successfully. Please verify DNS records.",
+      message: "Domain added. Add the DNS records, then verify the domain.",
     }));
   } catch (error: unknown) {
     const errorObj = error as { errors?: unknown; message?: string };
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
 
     console.error("API Error:", error);
     return cors(NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Something went wrong. Try again in a moment." },
       { status: 500 }
     ));
   }
