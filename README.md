@@ -8,17 +8,17 @@ FreeResend allows you to host your own email service using Amazon SES and option
 
 ## Features
 
-- 🚀 **100% Resend-compatible** - True drop-in replacement using environment variables
-- 🏠 **Self-hosted** - Full control over your email infrastructure
-- 📧 **Amazon SES integration** - Reliable email delivery with DKIM support
-- 🌐 **Automatic DNS setup** - Integration with Digital Ocean for DNS record creation
-- 🔐 **DKIM authentication** - Automatic DKIM key generation and DNS record creation
-- 🔑 **API key management** - Generate and manage multiple API keys per domain
-- 📊 **Email logging** - Track all sent emails with delivery status and logs
-- 🎯 **Domain verification** - Automated domain verification with SES
-- 🔒 **Secure** - JWT-based authentication and robust API key validation
-- 🐳 **Docker ready** - Containerized deployment with Docker Compose
-- 📝 **Comprehensive logging** - Detailed email logs with webhook support
+- **100% Resend-compatible** - True drop-in replacement using environment variables
+- **Self-hosted** - Full control over your email infrastructure
+- **Amazon SES integration** - Reliable email delivery with DKIM support
+- **Automatic DNS setup** - Integration with Digital Ocean for DNS record creation
+- **DKIM authentication** - Automatic DKIM key generation and DNS record creation
+- **API key management** - Generate and manage multiple API keys per domain
+- **Email logging** - Track all sent emails with delivery status and logs
+- **Domain verification** - Automated domain verification with SES
+- **Secure** - JWT-based authentication and robust API key validation
+- **Docker ready** - Containerized deployment with Docker Compose
+- **Comprehensive logging** - Detailed email logs with webhook support
 
 ## Quick Start
 
@@ -228,30 +228,30 @@ npm test
 
 **Q: Getting "Invalid API key" errors**
 
-- ✅ Make sure you copied the **complete API key** from the green success message (not the masked version from the table)
-- ✅ API keys have format: `frs_keyId_secretPart` (3 parts separated by underscores)
+- Make sure you copied the **complete API key** from the green success message (not the masked version from the table)
+- API keys have format: `frs_keyId_secretPart` (3 parts separated by underscores)
 
 **Q: Digital Ocean DNS automation not working**
 
-- ✅ Verify your DO API token has **Read & Write** access to **Domains** and **Domain Records**
-- ✅ Ensure your domain is added to Digital Ocean's DNS management
-- ✅ Test token: `curl -H "Authorization: Bearer YOUR_TOKEN" https://api.digitalocean.com/v2/domains`
+- Verify your DO API token has **Read & Write** access to **Domains** and **Domain Records**
+- Ensure your domain is added to Digital Ocean's DNS management
+- Test token: `curl -H "Authorization: Bearer YOUR_TOKEN" https://api.digitalocean.com/v2/domains`
 
 **Q: Domain verification stuck at "pending"**
 
-- ✅ DNS propagation takes 5-30 minutes - be patient!
-- ✅ Check DNS records: `dig TXT _amazonses.yourdomain.com`
-- ✅ Ensure all DNS records are created properly
+- DNS propagation takes 5-30 minutes - be patient!
+- Check DNS records: `dig TXT _amazonses.yourdomain.com`
+- Ensure all DNS records are created properly
 
 **Q: AWS SES permissions error**
 
-- ✅ Make sure your IAM policy includes **DKIM permissions**: `ses:VerifyDomainDkim` and `ses:GetIdentityDkimAttributes`
-- ✅ Verify your AWS account is out of SES sandbox mode
+- Make sure your IAM policy includes **DKIM permissions**: `ses:VerifyDomainDkim` and `ses:GetIdentityDkimAttributes`
+- Verify your AWS account is out of SES sandbox mode
 
 **Q: Resend SDK not working with FreeResend**
 
-- ✅ Set environment variable: `export RESEND_BASE_URL="https://your-domain.com/api"`
-- ✅ Use FreeResend API key (starts with `frs_`), not Resend API key
+- Set environment variable: `export RESEND_BASE_URL="https://your-domain.com/api"`
+- Use FreeResend API key (starts with `frs_`), not Resend API key
 
 ## Production Deployment
 
@@ -305,39 +305,6 @@ npm start
 npm run lint
 ```
 
-## Repository Structure
-
-```
-freeresend/
-├── src/
-│   ├── app/                 # Next.js App Router
-│   │   ├── api/            # API routes
-│   │   │   ├── auth/       # Authentication endpoints
-│   │   │   ├── domains/    # Domain management
-│   │   │   ├── api-keys/   # API key management
-│   │   │   ├── emails/     # Email sending & logs
-│   │   │   └── webhooks/   # SES webhook handlers
-│   │   ├── globals.css     # Global styles
-│   │   ├── layout.tsx      # Root layout
-│   │   └── page.tsx        # Main dashboard page
-│   ├── components/         # React components
-│   │   ├── Dashboard.tsx   # Main dashboard
-│   │   ├── LoginForm.tsx   # Authentication
-│   │   └── *Tab.tsx        # Tab components
-│   ├── contexts/           # React contexts
-│   └── lib/                # Core business logic
-│       ├── supabase.ts     # Database client
-│       ├── auth.ts         # Authentication logic
-│       ├── ses.ts          # Amazon SES integration
-│       ├── digitalocean.ts # DNS automation
-│       ├── domains.ts      # Domain management
-│       ├── api-keys.ts     # API key logic
-│       └── middleware.ts   # API middleware
-├── database.sql            # Database schema
-├── docker-compose.yml      # Development setup
-└── README.md              # This file
-```
-
 ## Contributing
 
 We welcome contributions! Here's how to get started:
@@ -353,11 +320,11 @@ We welcome contributions! Here's how to get started:
 
 ### Contributing Guidelines
 
-- 🐛 **Bug fixes** - Always welcome with test cases
-- ✨ **New features** - Open an issue first to discuss
-- 📝 **Documentation** - Improvements always appreciated
-- 🧪 **Tests** - Required for new features
-- 💻 **Code style** - Follow existing patterns
+- **Bug fixes** - Always welcome with test cases
+- **New features** - Open an issue first to discuss
+- **Documentation** - Improvements always appreciated
+- **Tests** - Required for new features
+- **Code style** - Follow existing patterns
 
 ### Pull Request Process
 
@@ -382,7 +349,7 @@ MIT License - see LICENSE file for details.
 
 ## Support
 
-- 🐛 **Issues**: Report bugs via [GitHub Issues](https://github.com/eibrahim/freeresend/issues)
+- **Issues**: Report bugs via [GitHub Issues](https://github.com/eibrahim/freeresend/issues)
 
 ## Roadmap
 

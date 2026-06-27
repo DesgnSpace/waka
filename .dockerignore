@@ -1,6 +1,8 @@
 # Dependencies
 node_modules
 npm-debug.log
+bun-debug.log
+*.log
 
 # Next.js build outputs
 .next
@@ -32,10 +34,7 @@ coverage
 .nyc_output
 
 # Documentation
-README.md
-SETUP.md
-CONTRIBUTING.md
-DEPLOYMENT.md
+*.md
 
 # Vercel
 .vercel
@@ -47,10 +46,18 @@ Dockerfile
 # Kubernetes
 k8s/
 
-# Tests
+# CI / tooling / agent dirs
+.github
+.kiro
+.claude
+
+# Tests + dev test scripts
 src/**/__tests__/
 **/*.test.ts
 **/*.test.tsx
 **/*.spec.ts
 **/*.spec.tsx
 jest.config.js
+test-email.js
+test-smtp.js
+test-curl.sh

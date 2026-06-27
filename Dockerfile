@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # --- deps: install with bun against the committed bun.lock -------------------
 # Lockfiles copied before source so a code change doesn't bust the install cache.
 FROM oven/bun:1.3-alpine AS deps
