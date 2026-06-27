@@ -19,8 +19,8 @@ export const metadata: Metadata = {
   description:
     "Open-source, self-hosted alternative to Resend. 100% API compatible with 85% cost savings using Amazon SES. Drop-in replacement with auto DNS setup.",
   keywords: "resend alternative, self-hosted email, amazon ses, transactional email, email api, open source",
-  authors: [{ name: "Emad Ibrahim", url: "https://x.com/eibrahim" }],
-  creator: "Emad Ibrahim",
+  authors: [{ name: "FreeResend Contributors", url: "https://github.com/eibrahim/freeresend" }],
+  creator: "FreeResend Contributors",
   openGraph: {
     title: "FreeResend - Self-hosted Alternative to Resend",
     description: "100% API compatible • 85% cost savings • Complete control over your email infrastructure",
@@ -32,7 +32,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "FreeResend - Self-hosted Alternative to Resend",
     description: "100% API compatible • 85% cost savings • Complete control over your email infrastructure",
-    creator: "@eibrahim",
+    creator: "@freeresend",
   },
 };
 
@@ -44,11 +44,6 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <Script
-          defer
-          src="https://analytics.hub.elitecoders.ai/umami"
-          data-website-id="14571765-f9b8-4ced-b501-61413f2bdabf"
-        />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}

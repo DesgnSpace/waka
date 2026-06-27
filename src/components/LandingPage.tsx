@@ -3,8 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import {
-  ArrowRight,
-  BookOpenCheck,
   Code,
   DollarSign,
   Globe,
@@ -14,13 +12,8 @@ import {
   Github,
   Copy,
   CheckCircle,
-  MailCheck,
-  FileText,
 } from "lucide-react";
 import EnvelopeIcon from "./EnvelopeIcon";
-import DeploymentReviewCta from "./DeploymentReviewCta";
-import LaunchKitCta from "./LaunchKitCta";
-import { deploymentReview, launchKit, sesProductionGuide, sesRequestHelper } from "@/config/launch-kit";
 
 export default function LandingPage() {
   const [copiedCode, setCopiedCode] = useState(false);
@@ -58,48 +51,10 @@ export default function LandingPage() {
                 <span className="hidden sm:inline">GitHub</span>
               </a>
               <Link
-                href={launchKit.productUrl}
-                className="hidden text-gray-600 transition-colors hover:text-gray-900 md:inline"
-              >
-                Launch Kit
-              </Link>
-              <Link
-                href={sesProductionGuide.productUrl}
-                className="hidden text-gray-600 transition-colors hover:text-gray-900 lg:inline"
-              >
-                Guide
-              </Link>
-              <Link
-                href="/tools/email-dns-checker"
-                className="hidden text-gray-600 transition-colors hover:text-gray-900 lg:inline"
-              >
-                DNS Check
-              </Link>
-              <Link
-                href={sesRequestHelper.productUrl}
-                className="hidden text-gray-600 transition-colors hover:text-gray-900 xl:inline"
-              >
-                SES Request
-              </Link>
-              <Link
-                href={deploymentReview.productUrl}
-                className="hidden text-gray-600 transition-colors hover:text-gray-900 lg:inline"
-              >
-                Review
-              </Link>
-              <Link
                 href="/login"
                 className="text-gray-600 hover:text-gray-900 transition-colors px-3 py-2"
               >
                 Login
-              </Link>
-              <Link
-                href="/pricing"
-                aria-label="Join Waitlist"
-                className="bg-blue-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
-              >
-                <span className="hidden sm:inline">Join Waitlist</span>
-                <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
           </div>
@@ -109,12 +64,6 @@ export default function LandingPage() {
       {/* Hero Section */}
       <section className="py-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto text-center">
-          <div className="flex justify-center mb-8">
-            <div className="bg-blue-100 text-blue-800 px-4 py-2 rounded-full text-sm font-medium">
-              🎉 Now Open Source • MIT License
-            </div>
-          </div>
-
           <h2 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 leading-tight">
             The{" "}
             <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
@@ -130,20 +79,6 @@ export default function LandingPage() {
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
-            <Link
-              href="/pricing"
-              className="bg-blue-600 text-white px-8 py-4 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2 font-semibold"
-            >
-              <span>Join Waitlist</span>
-              <ArrowRight className="h-5 w-5" />
-            </Link>
-            <Link
-              href="/pricing"
-              className="border-2 border-blue-600 text-blue-600 px-8 py-4 rounded-lg hover:bg-blue-50 transition-colors flex items-center justify-center space-x-2 font-semibold"
-            >
-              <DollarSign className="h-5 w-5" />
-              <span>See Pricing</span>
-            </Link>
             <a
               href="https://github.com/eibrahim/freeresend"
               target="_blank"
@@ -153,27 +88,6 @@ export default function LandingPage() {
               <Github className="h-5 w-5" />
               <span>View on GitHub</span>
             </a>
-            <Link
-              href={launchKit.productUrl}
-              className="border-2 border-gray-200 bg-white text-gray-700 px-8 py-4 rounded-lg hover:border-gray-300 transition-colors flex items-center justify-center space-x-2 font-semibold"
-            >
-              <BookOpenCheck className="h-5 w-5" />
-              <span>Launch Kit</span>
-            </Link>
-            <Link
-              href="/tools/email-dns-checker"
-              className="border-2 border-gray-200 bg-white text-gray-700 px-8 py-4 rounded-lg hover:border-gray-300 transition-colors flex items-center justify-center space-x-2 font-semibold"
-            >
-              <MailCheck className="h-5 w-5" />
-              <span>DNS Check</span>
-            </Link>
-            <Link
-              href={sesRequestHelper.productUrl}
-              className="border-2 border-gray-200 bg-white text-gray-700 px-8 py-4 rounded-lg hover:border-gray-300 transition-colors flex items-center justify-center space-x-2 font-semibold"
-            >
-              <FileText className="h-5 w-5" />
-              <span>SES Request</span>
-            </Link>
           </div>
           
           <div className="text-center mb-8">
@@ -183,89 +97,6 @@ export default function LandingPage() {
                 Login here
               </Link>
             </p>
-          </div>
-
-          {/* Pricing Teaser */}
-          <div className="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg p-6 mb-12 max-w-4xl mx-auto">
-            <div className="text-center">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                🚀 Hosted Version Coming Soon
-              </h3>
-              <p className="text-gray-600 mb-4">
-                Skip the setup and let us handle the infrastructure. Same great savings, zero maintenance.
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                <div className="bg-white rounded-lg p-4 border border-gray-100">
-                  <div className="font-semibold text-green-600">50-85% Savings</div>
-                  <div className="text-gray-500">vs. premium services</div>
-                </div>
-                <div className="bg-white rounded-lg p-4 border border-gray-100">
-                  <div className="font-semibold text-blue-600">Fully Managed</div>
-                  <div className="text-gray-500">No server maintenance</div>
-                </div>
-                <div className="bg-white rounded-lg p-4 border border-gray-100">
-                  <div className="font-semibold text-purple-600">API Compatible</div>
-                  <div className="text-gray-500">Drop-in Resend replacement</div>
-                </div>
-              </div>
-              <div className="mt-4">
-                <Link
-                  href="/pricing"
-                  className="inline-flex items-center space-x-2 text-blue-600 hover:text-blue-700 font-medium"
-                >
-                  <span>Calculate your savings</span>
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          <div className="mx-auto mb-12 max-w-4xl text-left">
-            <LaunchKitCta compact />
-          </div>
-
-          <div className="mx-auto mb-12 max-w-4xl rounded-lg border border-emerald-100 bg-white p-6 text-left shadow-sm">
-            <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-center">
-              <div>
-                <p className="text-sm font-medium uppercase tracking-wide text-emerald-700">Production readiness</p>
-                <h3 className="mt-2 text-2xl font-bold text-gray-900">Check SES launch risk before the first send.</h3>
-                <p className="mt-3 text-gray-600">
-                  A free guide for sandbox status, DNS authentication, bounce and complaint webhooks, smoke tests, and
-                  rollback planning.
-                </p>
-              </div>
-              <Link
-                href={sesProductionGuide.productUrl}
-                className="inline-flex items-center justify-center space-x-2 rounded-lg bg-emerald-600 px-5 py-3 font-semibold text-white transition-colors hover:bg-emerald-700"
-              >
-                <BookOpenCheck className="h-5 w-5" />
-                <span>Read guide</span>
-              </Link>
-            </div>
-          </div>
-
-          <div className="mx-auto mb-12 max-w-4xl rounded-lg border border-indigo-100 bg-white p-6 text-left shadow-sm">
-            <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-center">
-              <div>
-                <p className="text-sm font-medium uppercase tracking-wide text-indigo-700">SES access request</p>
-                <h3 className="mt-2 text-2xl font-bold text-gray-900">Draft the production request without secrets.</h3>
-                <p className="mt-3 text-gray-600">
-                  Turn public domain, volume, opt-in, bounce, and complaint details into an AWS reviewer-friendly SES
-                  production access request.
-                </p>
-              </div>
-              <Link
-                href={sesRequestHelper.productUrl}
-                className="inline-flex items-center justify-center space-x-2 rounded-lg bg-indigo-600 px-5 py-3 font-semibold text-white transition-colors hover:bg-indigo-700"
-              >
-                <FileText className="h-5 w-5" />
-                <span>Draft request</span>
-              </Link>
-            </div>
-          </div>
-
-          <div className="mx-auto mb-12 max-w-4xl text-left">
-            <DeploymentReviewCta compact />
           </div>
 
           {/* Migration Code Example */}
@@ -327,13 +158,6 @@ export default function LandingPage() {
                 <div className="text-green-700">
                   100k emails/month: <span className="font-semibold">$10</span> vs Resend&apos;s <span className="line-through">$100</span>
                 </div>
-                <Link
-                  href="/pricing"
-                  className="inline-flex items-center space-x-1 text-green-600 hover:text-green-700 font-medium mt-2"
-                >
-                  <span>Calculate your savings</span>
-                  <ArrowRight className="h-3 w-3" />
-                </Link>
               </div>
             </div>
 
@@ -349,17 +173,10 @@ export default function LandingPage() {
                 just update your environment variable.
               </p>
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
-                <div className="font-semibold text-blue-800 mb-1">Hosted Version:</div>
+                <div className="font-semibold text-blue-800 mb-1">Zero Code Changes:</div>
                 <div className="text-blue-700">
-                  Same compatibility, zero maintenance. Join the waitlist for early access.
+                  Just update RESEND_BASE_URL and your existing Resend code works unchanged.
                 </div>
-                <Link
-                  href="/pricing"
-                  className="inline-flex items-center space-x-1 text-blue-600 hover:text-blue-700 font-medium mt-2"
-                >
-                  <span>Learn about pricing</span>
-                  <ArrowRight className="h-3 w-3" />
-                </Link>
               </div>
             </div>
 
@@ -375,17 +192,10 @@ export default function LandingPage() {
                 sending emails in under 60 seconds.
               </p>
               <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 text-sm">
-                <div className="font-semibold text-purple-800 mb-1">Even Faster:</div>
+                <div className="font-semibold text-purple-800 mb-1">Auto DNS Setup:</div>
                 <div className="text-purple-700">
-                  Hosted version = instant setup. No servers, no configuration.
+                  Digital Ocean integration for automatic DNS record creation. From domain to sending in under 60 seconds.
                 </div>
-                <Link
-                  href="/pricing"
-                  className="inline-flex items-center space-x-1 text-purple-600 hover:text-purple-700 font-medium mt-2"
-                >
-                  <span>See hosted pricing</span>
-                  <ArrowRight className="h-3 w-3" />
-                </Link>
               </div>
             </div>
           </div>
@@ -460,121 +270,10 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Comparison Table */}
-      <section className="py-20 bg-white">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h3 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
-              FreeResend vs. Premium Services
-            </h3>
-            <p className="text-lg text-gray-600">
-              Get the same features at a fraction of the cost
-            </p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">
-                      Feature
-                    </th>
-                    <th className="px-6 py-4 text-center text-sm font-semibold text-gray-900">
-                      FreeResend
-                    </th>
-                    <th className="px-6 py-4 text-center text-sm font-semibold text-gray-900">
-                      Premium Services
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {[
-                    {
-                      feature: "Cost per 1,000 emails",
-                      freeresend: "$0.10 (SES rates)",
-                      premium: "$1.00 - $2.00+",
-                    },
-                    {
-                      feature: "API Compatibility",
-                      freeresend: "100% Resend compatible",
-                      premium: "Proprietary APIs",
-                    },
-                    {
-                      feature: "Domain Setup Time",
-                      freeresend: "< 60 seconds (auto)",
-                      premium: "15+ minutes (manual)",
-                    },
-                    {
-                      feature: "Self-Hosted",
-                      freeresend: "✓ Full control",
-                      premium: "✗ Vendor lock-in",
-                    },
-                    {
-                      feature: "Open Source",
-                      freeresend: "✓ MIT License",
-                      premium: "✗ Proprietary",
-                    },
-                    {
-                      feature: "Custom Modifications",
-                      freeresend: "✓ Unlimited",
-                      premium: "✗ Limited",
-                    },
-                  ].map((row, index) => (
-                    <tr key={index}>
-                      <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                        {row.feature}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-center text-green-600 font-semibold">
-                        {row.freeresend}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-center text-gray-500">
-                        {row.premium}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="py-20 bg-gradient-to-r from-blue-600 to-purple-600">
-        <div className="max-w-4xl mx-auto text-center px-4 sm:px-6 lg:px-8">
-          <h3 className="text-3xl md:text-4xl font-bold text-white mb-6">
-            Ready to Take Control of Your Email Infrastructure?
-          </h3>
-          <p className="text-xl text-blue-100 mb-8">
-            Join developers already saving money with FreeResend
-          </p>
-
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link
-              href="/pricing"
-              className="bg-white text-blue-600 px-8 py-4 rounded-lg hover:bg-gray-100 transition-colors flex items-center justify-center space-x-2 font-semibold"
-            >
-              <span>Join Waitlist Today</span>
-              <ArrowRight className="h-5 w-5" />
-            </Link>
-            <a
-              href="https://github.com/eibrahim/freeresend"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="border-2 border-white text-white px-8 py-4 rounded-lg hover:bg-white hover:text-blue-600 transition-colors flex items-center justify-center space-x-2 font-semibold"
-            >
-              <Github className="h-5 w-5" />
-              <span>View Documentation</span>
-            </a>
-          </div>
-        </div>
-      </section>
-
       {/* Footer */}
       <footer className="bg-gray-900 text-white py-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid md:grid-cols-4 gap-8">
+          <div className="grid md:grid-cols-3 gap-8">
             <div>
               <div className="flex items-center space-x-2 mb-4">
                 <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
@@ -591,54 +290,6 @@ export default function LandingPage() {
               <h5 className="font-semibold mb-4">Resources</h5>
               <ul className="space-y-2">
                 <li>
-                  <Link
-                    href={launchKit.productUrl}
-                    className="text-gray-400 hover:text-white transition-colors"
-                  >
-                    Launch Kit
-                  </Link>
-                </li>
-                <li>
-                  <Link
-                    href={deploymentReview.productUrl}
-                    className="text-gray-400 hover:text-white transition-colors"
-                  >
-                    Deployment Review
-                  </Link>
-                </li>
-                <li>
-                  <Link
-                    href={sesProductionGuide.productUrl}
-                    className="text-gray-400 hover:text-white transition-colors"
-                  >
-                    SES Production Guide
-                  </Link>
-                </li>
-                <li>
-                  <Link
-                    href="/tools/email-dns-checker"
-                    className="text-gray-400 hover:text-white transition-colors"
-                  >
-                    DNS Readiness Checker
-                  </Link>
-                </li>
-                <li>
-                  <Link
-                    href={sesRequestHelper.productUrl}
-                    className="text-gray-400 hover:text-white transition-colors"
-                  >
-                    SES Request Helper
-                  </Link>
-                </li>
-                <li>
-                  <a
-                    href="https://github.com/eibrahim/freeresend"
-                    className="text-gray-400 hover:text-white transition-colors"
-                  >
-                    Documentation
-                  </a>
-                </li>
-                <li>
                   <a
                     href="https://github.com/eibrahim/freeresend"
                     className="text-gray-400 hover:text-white transition-colors"
@@ -654,12 +305,6 @@ export default function LandingPage() {
                     Issues
                   </a>
                 </li>
-              </ul>
-            </div>
-
-            <div>
-              <h5 className="font-semibold mb-4">Community</h5>
-              <ul className="space-y-2">
                 <li>
                   <a
                     href="https://github.com/eibrahim/freeresend/discussions"
@@ -676,14 +321,6 @@ export default function LandingPage() {
                     Contributing
                   </a>
                 </li>
-                <li>
-                  <a
-                    href="https://x.com/eibrahim"
-                    className="text-gray-400 hover:text-white transition-colors"
-                  >
-                    Twitter
-                  </a>
-                </li>
               </ul>
             </div>
 
@@ -698,28 +335,20 @@ export default function LandingPage() {
                     MIT License
                   </a>
                 </li>
-                <li>
-                  <a
-                    href="https://x.com/eibrahim"
-                    className="text-gray-400 hover:text-white transition-colors"
-                  >
-                    Contact
-                  </a>
-                </li>
               </ul>
             </div>
           </div>
 
           <div className="border-t border-gray-800 mt-8 pt-8 text-center">
             <p className="text-gray-400">
-              Built by{" "}
+              MIT Licensed — Fork of the{" "}
               <a
-                href="https://x.com/eibrahim"
+                href="https://github.com/eibrahim/freeresend"
                 className="text-blue-400 hover:text-blue-300"
               >
-                @eibrahim
+                original FreeResend
               </a>{" "}
-              • MIT Licensed • Made with ❤️ for developers.
+              by Emad Ibrahim
             </p>
           </div>
         </div>

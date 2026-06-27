@@ -2,9 +2,7 @@
   "name": "freeresend",
   "version": "1.0.0",
   "description": "Self-hosted, open-source alternative to Resend for sending transactional emails with Amazon SES",
-  "author": "Emad Ibrahim <eibrahim@gmail.com> (https://x.com/eibrahim)",
   "license": "MIT",
-  "homepage": "https://github.com/eibrahim/freeresend#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/eibrahim/freeresend.git"

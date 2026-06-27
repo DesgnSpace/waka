@@ -90,43 +90,14 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center text-sm text-gray-500">
             <div>
-              <span>Built with ❤️ by </span>
+              <span>FreeResend — </span>
               <a
-                href="https://x.com/eibrahim"
+                href="https://github.com/eibrahim/freeresend"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-600 hover:text-blue-800 font-medium"
               >
-                Emad Ibrahim
-              </a>
-              <span className="mx-2">•</span>
-              <a
-                href="https://www.frontendweekly.co/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:text-blue-800 font-medium"
-              >
-                Frontend Weekly
-              </a>
-              <span className="mx-2">•</span>
-              <a
-                href="https://www.elitesaas.dev/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:text-blue-800 font-medium"
-              >
-                EliteSaaS
-              </a>
-            </div>
-            <div className="text-xs">
-              <span>Powered by EliteCoders - </span>
-              <a
-                href="https://elitecoders.co/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:text-blue-800 underline"
-              >
-                Get in touch
+                MIT Licensed
               </a>
             </div>
           </div>

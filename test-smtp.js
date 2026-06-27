@@ -22,7 +22,7 @@ async function sendTestEmail() {
   console.log('Sending test email...');
   const info = await transporter.sendMail({
     from: 'noreply@phlauncher.com',
-    to: 'eibrahim@gmail.com',
+    to: 'your-email@example.com',
     subject: 'FreeResend SMTP Test - phlauncher.com',
     text: 'This is a test email sent via SMTP using the generated credentials from FreeResend!',
     html: `

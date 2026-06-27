@@ -67,7 +67,7 @@ vercel env add DATABASE_URL
 ```
 
 #### Option C: One-Click Deploy
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Feibrahim%2Ffreeresend)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=<your-repo-url>)
 
 ### 4. Domain Configuration
 
@@ -184,9 +184,7 @@ vercel --prod
 ## Support
 
 - **Documentation**: Check README.md and SETUP.md
-- **Launch Kit**: Optional deployment checklist at [freeresend.com/launch-kit](https://www.freeresend.com/launch-kit)
 - **Issues**: [GitHub Issues](https://github.com/eibrahim/freeresend/issues)
-- **Professional Support**: [EliteCoders](https://elitecoders.co/)
 
 ---
 

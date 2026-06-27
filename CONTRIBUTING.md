@@ -7,7 +7,7 @@ Thank you for your interest in contributing to FreeResend! This document provide
 1. **Fork the repository** on GitHub
 2. **Clone your fork**:
    ```bash
-   git clone https://github.com/eibrahim/freeresend.git
+   git clone <your-repo-url>
    cd freeresend
    ```
 3. **Install dependencies**:
@@ -231,7 +231,7 @@ npm run build
 - **Issues**: Search existing GitHub issues
 - **Discussions**: Use GitHub Discussions for questions
 - **Code Review**: Ask for feedback on draft PRs
-- **Professional Support**: For enterprise deployments or custom development, contact [EliteCoders](https://elitecoders.co/)
+
 
 ## 🙏 Recognition
 
@@ -245,4 +245,4 @@ Thank you for helping make FreeResend better! 🚀
 
 ---
 
-**FreeResend** is built and maintained by **[Emad Ibrahim](https://x.com/eibrahim)** with professional support from [**EliteCoders**](https://elitecoders.co/) - building powerful software solutions for businesses worldwide. 🌎
+**FreeResend** was originally created by **[Emad Ibrahim](https://github.com/eibrahim)**. This fork continues the project under the MIT license.

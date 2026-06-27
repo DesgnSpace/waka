@@ -11,7 +11,7 @@
 const API_BASE_URL = "http://localhost:3000";
 const API_KEY = "rev"; // Replace with your actual API key from FreeResend
 const FROM_EMAIL = "info@freeresend.com"; // Replace with your verified domain
-const TO_EMAIL = "eibrahim@gmail.com"; // Replace with your email address
+const TO_EMAIL = "your-email@example.com"; // Replace with your email address
 
 // Test 1: Direct API call
 async function testDirectAPI() {

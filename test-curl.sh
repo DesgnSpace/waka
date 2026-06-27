@@ -5,7 +5,7 @@
 
 API_KEY=""  # Get from FreeResend API Keys tab
 FROM_EMAIL="info@freeresend.com"  # Your verified domain email
-TO_EMAIL="eibrahim@gmail.com"  # Your email address
+TO_EMAIL="your-email@example.com"  # Your email address
 BASE_URL="http://localhost:3000"
 
 echo "🚀 Testing FreeResend with cURL"

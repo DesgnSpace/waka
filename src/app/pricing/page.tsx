@@ -1,8 +1,6 @@
 import { Metadata } from 'next';
 import Link from 'next/link';
 import PricingCalculator from '../../components/PricingCalculator';
-import DeploymentReviewCta from '../../components/DeploymentReviewCta';
-import LaunchKitCta from '../../components/LaunchKitCta';
 
 export const metadata: Metadata = {
   title: 'Pricing Calculator - FreeResend',
@@ -36,14 +34,6 @@ export default function PricingPage() {
 
         {/* Pricing Calculator */}
         <PricingCalculator />
-
-        <div className="mt-12">
-          <LaunchKitCta />
-        </div>
-
-        <div className="mt-8">
-          <DeploymentReviewCta />
-        </div>
 
         {/* Key Benefits */}
         <div className="mt-16 grid md:grid-cols-3 gap-8">
@@ -105,7 +95,7 @@ export default function PricingPage() {
               rel="noopener noreferrer"
               className="border-2 border-white text-white px-8 py-3 rounded-lg hover:bg-white hover:text-blue-600 transition-colors font-semibold"
             >
-              View Documentation
+              View on GitHub
             </a>
           </div>
         </div>
@@ -219,7 +209,7 @@ export default function PricingPage() {
                 </h3>
                 <p className="text-gray-600 text-sm">
                   FreeResend is open source with community support. 
-                  Enterprise support available through EliteCoders.
+                  Community support is available through GitHub Discussions.
                 </p>
               </div>
 

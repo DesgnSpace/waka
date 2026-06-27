@@ -4,15 +4,7 @@
 
 FreeResend allows you to host your own email service using Amazon SES and optionally Digital Ocean for DNS management. It provides a Resend-compatible API so you can use it as a drop-in replacement.
 
-> 📰 **Stay updated**: Get the latest frontend development insights delivered weekly with [**Frontend Weekly**](https://www.frontendweekly.co/) - curated by the author of FreeResend!
-
-> 🧭 **Need a production rollout checklist?** FreeResend stays MIT-licensed and free to self-host. The optional [$12 Self-Hosted Launch Kit](https://www.freeresend.com/launch-kit) gives you a DNS, SES, webhook, smoke-test, and rollback checklist while supporting the project. You can also [buy it directly on Stripe](https://buy.stripe.com/4gMeVc3bdaJ20y7crTaMU00).
-
-> 🔎 **Want a second set of eyes before launch?** The optional [$12 FreeResend Deployment Review](https://www.freeresend.com/deployment-review) is a narrow manual review of one self-hosted rollout plan. Stripe collects your deployment URL or GitHub issue and main SES/DNS concern. You can also [book it directly on Stripe](https://buy.stripe.com/3cIcN49zBcRagx5dvXaMU01).
-
-> 📬 **Checking DNS before SES launch?** Run the free [Email DNS Readiness Checker](https://www.freeresend.com/tools/email-dns-checker) for SPF, DMARC, DKIM, and MX records before sending production traffic.
-
-> 📨 **Need SES production access?** Use the free [SES Production Request Helper](https://www.freeresend.com/tools/ses-production-request-helper) to draft a reviewer-friendly request without sharing secrets or customer data.
+> **Acknowledgement:** FreeResend was originally created by [Emad Ibrahim](https://github.com/eibrahim). This fork continues the project's mission of providing affordable, self-hosted email infrastructure. Thank you to all the [original contributors](https://github.com/eibrahim/freeresend/graphs/contributors).
 
 ## Features
 
@@ -372,7 +364,7 @@ We welcome contributions! Here's how to get started:
 ### Development Setup
 
 1. **Fork the repository** on GitHub
-2. **Clone your fork**: `git clone https://github.com/eibrahim/freeresend.git`
+2. **Clone your fork**: `git clone <your-repo-url>`
 3. **Install dependencies**: `npm install`
 4. **Set up environment** following the Quick Start guide above
 5. **Run tests**: `node test-email.js`
@@ -409,14 +401,7 @@ MIT License - see LICENSE file for details.
 
 ## Support
 
-- 📖 **Documentation**: Check SETUP.md for detailed setup instructions
-- 🧭 **Launch Kit**: Optional [$12 self-hosted deployment checklist](https://www.freeresend.com/launch-kit)
-- 🔎 **Deployment Review**: Optional [$12 one-page review of your SES, DNS, webhook, and launch-risk plan](https://www.freeresend.com/deployment-review)
-- 📬 **DNS Checker**: Free [email DNS readiness checker](https://www.freeresend.com/tools/email-dns-checker) for SPF, DMARC, DKIM, and MX records
-- 📨 **SES Request Helper**: Free [SES production access request draft helper](https://www.freeresend.com/tools/ses-production-request-helper) for a safe, public-data-only AWS support request
 - 🐛 **Issues**: Report bugs via [GitHub Issues](https://github.com/eibrahim/freeresend/issues)
-- 💡 **Feature Requests**: Suggest improvements via GitHub Issues
-- 🚀 **Professional Support**: Custom development and enterprise support available via [EliteCoders](https://elitecoders.co/)
 
 ## Roadmap
 
@@ -429,27 +414,3 @@ MIT License - see LICENSE file for details.
 - [ ] Email campaign management
 
 ---
-
-## About the Author
-
-FreeResend is built and maintained by **[Emad Ibrahim](https://x.com/eibrahim)** - a software engineer and entrepreneur passionate about creating developer tools and open-source solutions.
-
-### 👨‍💻 **Connect with Emad**
-
-- 🐦 **Twitter**: [@eibrahim](https://x.com/eibrahim) - Follow for updates on FreeResend and web development insights
-- 📧 **Email**: [eibrahim@gmail.com](mailto:eibrahim@gmail.com)
-- 📰 **Newsletter**: [Frontend Weekly](https://www.frontendweekly.co/) - The best frontend development articles delivered weekly
-- 💼 **Professional Services**: Custom development and enterprise support via [EliteCoders](https://elitecoders.co/)
-
-### 🚀 **Need Custom Development?**
-
-If you need help with:
-
-- 🏗️ **Custom email infrastructure** modifications
-- 🚀 **Enterprise deployments** and scaling
-- 🔧 **Integration** with your existing systems
-- 🎯 **Feature development** beyond the roadmap
-
-**[Get in touch with EliteCoders →](https://elitecoders.co/)**
-
-_Building powerful software solutions for businesses worldwide_ 🌎
