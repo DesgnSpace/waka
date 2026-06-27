@@ -32,7 +32,7 @@ export async function generateApiKey(
   // Generate a secure API key with prefix
   const keyId = nanoid(8);
   const keySecret = nanoid(32);
-  const apiKey = `wka_${keyId}_${keySecret}`; // frs = Waka
+  const apiKey = `wka_${keyId}_${keySecret}`; // wka = Waka
 
   // Hash the key for storage
   const keyHash = await bcrypt.hash(apiKey, 10);
@@ -82,7 +82,7 @@ export async function verifyApiKey(apiKey: string): Promise<ApiKey | null> {
   const keyId_part = apiKey.substring(firstUnderscore + 1, secondUnderscore);
   const secret_part = apiKey.substring(secondUnderscore + 1);
 
-  if (prefix_part !== "frs" || !keyId_part || !secret_part) {
+  if (prefix_part !== "wka" || !keyId_part || !secret_part) {
     return null;
   }
 
