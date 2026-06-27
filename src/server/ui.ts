@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import {
   sessionUser,
   sessionCookie,
@@ -27,7 +28,11 @@ function esc(value: unknown): string {
 function html(body: string, init: ResponseInit = {}): Response {
   return new Response(body, {
     ...init,
-    headers: { "Content-Type": "text/html; charset=utf-8", ...(init.headers ?? {}) },
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy": CSP,
+      ...(init.headers ?? {}),
+    },
   });
 }
 
@@ -261,27 +266,59 @@ pre{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;whit
 .htmx-request{opacity:.6;pointer-events:none}
 `;
 
-const THEME_SCRIPT = `
-(function(){
-  const root = document.documentElement;
-  const saved = localStorage.getItem('waka-theme');
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  if (saved === 'dark' || (!saved && prefersDark)) root.classList.add('dark');
+// All dashboard JS lives in this one inline block (theme toggle + copy button),
+// wired via event delegation so there are no inline on* handlers. CSP allows it
+// by its sha256 hash (APP_SCRIPT_HASH) — no 'unsafe-inline', no vendored files.
+const APP_SCRIPT = `(function(){
+  const root=document.documentElement;
+  const saved=localStorage.getItem('waka-theme');
+  const prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;
+  if(saved==='dark'||(!saved&&prefersDark))root.classList.add('dark');
   function updateBtn(){
-    const btn = document.getElementById('theme-toggle');
-    if (!btn) return;
-    const isDark = root.classList.contains('dark');
-    btn.innerHTML = isDark ? '${ICONS.moon} Light' : '${ICONS.sun} Dark';
-    btn.setAttribute('aria-label', isDark ? 'Switch to light mode' : 'Switch to dark mode');
+    const btn=document.getElementById('theme-toggle');
+    if(!btn)return;
+    const isDark=root.classList.contains('dark');
+    btn.innerHTML=isDark?${JSON.stringify(`${ICONS.moon} Light`)}:${JSON.stringify(`${ICONS.sun} Dark`)};
+    btn.setAttribute('aria-label',isDark?'Switch to light mode':'Switch to dark mode');
   }
-  window.toggleTheme = function(){
-    root.classList.toggle('dark');
-    localStorage.setItem('waka-theme', root.classList.contains('dark') ? 'dark' : 'light');
-    updateBtn();
-  };
-  document.addEventListener('DOMContentLoaded', updateBtn);
-})();
-`;
+  document.addEventListener('click',function(e){
+    if(e.target.closest('#theme-toggle')){
+      root.classList.toggle('dark');
+      localStorage.setItem('waka-theme',root.classList.contains('dark')?'dark':'light');
+      updateBtn();
+      return;
+    }
+    const c=e.target.closest('[data-copy]');
+    if(c){
+      const code=c.parentElement&&c.parentElement.querySelector('code');
+      if(!code)return;
+      navigator.clipboard.writeText(code.innerText).then(function(){
+        const o=c.innerHTML; c.textContent='Copied'; setTimeout(function(){c.innerHTML=o;},1500);
+      });
+    }
+  });
+  document.addEventListener('DOMContentLoaded',updateBtn);
+})();`;
+
+const APP_SCRIPT_HASH =
+  "sha256-" + crypto.createHash("sha256").update(APP_SCRIPT).digest("base64");
+
+// htmx, pinned to a Subresource Integrity hash so the browser rejects any
+// tampered CDN response.
+const HTMX_SRC = "https://cdn.jsdelivr.net/npm/htmx.org@2.0.3/dist/htmx.min.js";
+const HTMX_SRI = "sha384-0895/pl2MU10Hqc6jd4RvrthNlDiE9U1tWmX7WRESftEDRosgxNsQG/Ze9YMRzHq";
+
+const CSP = [
+  "default-src 'self'",
+  `script-src 'self' '${APP_SCRIPT_HASH}' https://cdn.jsdelivr.net`,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "object-src 'none'",
+].join("; ");
 
 // --- sidebar nav -------------------------------------------------------------
 
@@ -309,7 +346,7 @@ function layout(title: string, body: string, user?: AuthUser | null): string {
           <nav id="sidebar-nav" class="sidebar-nav">${navItems("domains")}</nav>
           <div class="sidebar-footer">
             <span class="user-email">${esc(user.email)}</span>
-            <button id="theme-toggle" type="button" class="theme-toggle" onclick="toggleTheme()">${ICONS.sun} Theme</button>
+            <button id="theme-toggle" type="button" class="theme-toggle">${ICONS.sun} Theme</button>
             <a href="/logout" class="logout-link">Sign out</a>
           </div>
         </aside>
@@ -319,9 +356,9 @@ function layout(title: string, body: string, user?: AuthUser | null): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · waka</title>
-<script src="https://unpkg.com/htmx.org@2.0.3"></script>
+<script src="${HTMX_SRC}" integrity="${HTMX_SRI}" crossorigin="anonymous"></script>
 <style>${STYLE}</style>
-<script>${THEME_SCRIPT}</script>
+<script>${APP_SCRIPT}</script>
 </head><body>${inner}</body></html>`;
 }
 
@@ -610,7 +647,7 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
     else if (!keyName) banner = alert("err", "Key name is required.");
     else {
       const created = (await generateApiKey(user.id, domain.id, keyName)) as { key: string };
-      banner = `<div class="banner"><div class="banner-title">${ICONS.key}Copy this key now — it will not be shown again</div><div class="code-block"><code>${esc(created.key)}</code><button onclick="navigator.clipboard.writeText(this.previousElementSibling.innerText);this.innerText='Copied';setTimeout(()=>this.innerHTML='${ICONS.copy}',1500)" type="button">${ICONS.copy}</button></div></div>`;
+      banner = `<div class="banner"><div class="banner-title">${ICONS.key}Copy this key now — it will not be shown again</div><div class="code-block"><code>${esc(created.key)}</code><button data-copy type="button" aria-label="Copy API key">${ICONS.copy}</button></div></div>`;
     }
   } catch (err) {
     banner = alert("err", err instanceof Error ? err.message : "Failed to create key.");
