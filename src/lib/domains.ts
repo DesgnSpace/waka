@@ -6,6 +6,8 @@ import {
   generateDNSRecords,
   enableDomainDkim,
   getDomainDkimTokens,
+  setMailFromDomain,
+  mailFromRecords,
 } from "./ses";
 import type { Domain } from "./database";
 
@@ -14,6 +16,7 @@ export interface DNSRecord {
   name: string;
   value: string;
   ttl?: number;
+  description?: string;
 }
 
 export interface DomainSetupResult {
@@ -432,6 +435,48 @@ export async function deleteDomain(
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Couldn't delete domain: ${errorMessage}`);
   }
+}
+
+// Set or clear the custom MAIL FROM (return-path) domain. Blank clears it (SES
+// reverts to its default). The return domain must be a subdomain of the sending
+// domain so SPF aligns for DMARC. DNS records are rewritten to match.
+export async function updateMailFromDomain(
+  domainId: string,
+  userId: string,
+  mailFromRaw: string
+): Promise<{ mailFrom: string | null; dnsRecords: DNSRecord[] }> {
+  const domain = await getDomainById(domainId);
+  if (!domain || domain.user_id !== userId) {
+    throw new Error("Domain not found or you don't have access.");
+  }
+
+  const mailFrom = mailFromRaw.trim().toLowerCase() || null;
+  if (mailFrom && (!isValidDomain(mailFrom) || !mailFrom.endsWith(`.${domain.domain}`))) {
+    throw new Error(
+      `Return-path must be a subdomain of ${domain.domain}, e.g. bounce.${domain.domain}.`
+    );
+  }
+
+  // Best-effort SES update (needs ses:SetIdentityMailFromDomain). DNS records are
+  // stored regardless so the dashboard/export always shows what to publish.
+  try {
+    await setMailFromDomain(domain.domain, mailFrom);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(`SetIdentityMailFromDomain failed for ${domain.domain}: ${msg}`);
+  }
+
+  const base = safeParseDNSRecords(domain.dns_records).filter(
+    (r) => r.description !== "Custom MAIL FROM (return-path)" && r.description !== "MAIL FROM SPF"
+  );
+  const dnsRecords = mailFrom ? [...base, ...mailFromRecords(mailFrom)] : base;
+
+  await query(
+    "UPDATE domains SET mail_from_domain = $1, dns_records = $2, updated_at = NOW() WHERE id = $3",
+    [mailFrom, safeJSONStringify(dnsRecords), domainId]
+  );
+
+  return { mailFrom, dnsRecords };
 }
 
 export async function refreshAllDomainStatuses(): Promise<void> {

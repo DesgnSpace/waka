@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS domains (
   ses_identity_arn VARCHAR(255),
   ses_configuration_set VARCHAR(255),
   do_domain_id VARCHAR(255),
+  mail_from_domain VARCHAR(255), -- custom MAIL FROM (return-path) subdomain; nullable
   dns_records JSONB DEFAULT '[]',
   verification_token VARCHAR(255),
   smtp_credentials JSONB, -- Stores encrypted SMTP username/password

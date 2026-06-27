@@ -72,6 +72,7 @@ export interface Domain {
   verification_token?: string;
   ses_configuration_set?: string;
   do_domain_id?: string;
+  mail_from_domain?: string | null;
   dns_records: unknown[];
   smtp_credentials?: {
     username: string;

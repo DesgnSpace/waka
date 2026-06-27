@@ -3,7 +3,10 @@ import { query } from "@/lib/database";
 import { validateSnsMessage, confirmSubscription, type SnsMessage } from "@/lib/sns";
 
 interface SESMessage {
-  eventType: "send" | "delivery" | "bounce" | "complaint" | "reject";
+  // Config-set events use PascalCase `eventType` ("Delivery"); identity
+  // notifications use `notificationType`. Normalized to lower-case below.
+  eventType?: string;
+  notificationType?: string;
   mail: { messageId: string; timestamp: string; source: string; destination: string[] };
   bounce?: {
     bouncedRecipients: Array<{ emailAddress: string; diagnosticCode: string }>;
@@ -26,7 +29,8 @@ async function processSESEvent(message: SESMessage): Promise<void> {
     let newStatus = emailLog.status;
     let errorMessage: string | null = null;
 
-    switch (message.eventType) {
+    const eventType = (message.eventType ?? message.notificationType ?? "").toLowerCase();
+    switch (eventType) {
       case "delivery":
         newStatus = "delivered";
         break;
@@ -55,14 +59,14 @@ async function processSESEvent(message: SESMessage): Promise<void> {
     );
     await query(
       "INSERT INTO webhook_events (email_log_id, event_type, event_data, processed) VALUES ($1, $2, $3, $4)",
-      [emailLog.id, message.eventType, JSON.stringify(message), true]
+      [emailLog.id, eventType, JSON.stringify(message), true]
     );
   } catch (error) {
     console.error("Failed to process SES event:", error);
     try {
       await query(
         "INSERT INTO webhook_events (email_log_id, event_type, event_data, processed) VALUES ($1, $2, $3, $4)",
-        [null, message.eventType, JSON.stringify(message), false]
+        [null, message.eventType ?? message.notificationType ?? null, JSON.stringify(message), false]
       );
     } catch (insertError) {
       console.error("Failed to create webhook event record:", insertError);

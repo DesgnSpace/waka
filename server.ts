@@ -36,6 +36,7 @@ const server = Bun.serve({
     "/ui/domains": methods({ GET: ui.uiDomains, POST: ui.uiAddDomain }),
     "/ui/domains/:id": methods({ GET: ui.uiDomain }),
     "/ui/domains/:id/dns.zone": methods({ GET: ui.uiDomainDns }),
+    "/ui/domains/:id/mailfrom": methods({ POST: ui.uiSetMailFrom }),
     "/ui/domains/:id/verify": methods({ POST: ui.uiVerifyDomain }),
     "/ui/domains/:id/delete": methods({ POST: ui.uiDeleteDomain }),
     "/ui/domains/:id/logs": methods({ GET: ui.uiDomainLogs }),

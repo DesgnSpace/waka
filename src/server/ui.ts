@@ -12,6 +12,7 @@ import {
   getDomainById,
   deleteDomain,
   checkDomainVerification,
+  updateMailFromDomain,
 } from "@/lib/domains";
 import { getDomainApiKeys, generateApiKey, deleteApiKey } from "@/lib/api-keys";
 import { query } from "@/lib/database";
@@ -71,6 +72,8 @@ const FLASH: Record<string, { kind: "ok" | "err" | "mut"; text: string }> = {
   revoked: { kind: "ok", text: "API key revoked." },
   "domain-required": { kind: "err", text: "Domain is required." },
   "domain-failed": { kind: "err", text: "Could not add that domain." },
+  "mailfrom-saved": { kind: "ok", text: "Return-path domain saved — add the new DNS records." },
+  "mailfrom-failed": { kind: "err", text: "Return-path must be a subdomain of this domain." },
 };
 
 function flashFrom(req: Req): string {
@@ -518,7 +521,10 @@ function dnsTable(records: DnsRecord[]): string {
   return `<table><thead><tr><th>type</th><th>name</th><th>value</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-function domainOverview(domain: DomainRow & { dns_records?: DnsRecord[] }, flash = ""): string {
+function domainOverview(
+  domain: DomainRow & { dns_records?: DnsRecord[]; mail_from_domain?: string | null },
+  flash = ""
+): string {
   const dns: DnsRecord[] = Array.isArray(domain.dns_records) ? domain.dns_records : [];
   const dnsBlock = dns.length
     ? `<div class="block">
@@ -530,7 +536,16 @@ function domainOverview(domain: DomainRow & { dns_records?: DnsRecord[] }, flash
         </div>
       </div>`
     : "";
-  return `${flash}${dnsBlock}
+  const mailFrom = domain.mail_from_domain ?? "";
+  const mailFromBlock = `<div class="block">
+      <div class="block-title">return-path domain (optional)</div>
+      <p class="note" style="margin-bottom:12px">Aligns SPF for DMARC. Use a subdomain like <code>bounce.${esc(domain.domain)}</code>, or leave blank for the SES default.</p>
+      <form class="toolbar" method="post" action="/ui/domains/${esc(domain.id)}/mailfrom" hx-confirm="Update return-path domain?">
+        <input name="mailFrom" placeholder="bounce.${esc(domain.domain)}" value="${esc(mailFrom)}">
+        <button type="submit" class="btn btn-sm">save</button>
+      </form>
+    </div>`;
+  return `${flash}${dnsBlock}${mailFromBlock}
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
       ${domain.status !== "verified" ? actionForm(`/ui/domains/${esc(domain.id)}/verify`, "check DNS", "btn btn-quiet btn-sm", `Check DNS for ${domain.domain}?`) : ""}
       ${actionForm(`/ui/domains/${esc(domain.id)}/delete`, "delete domain", "btn btn-danger btn-sm", `Delete ${domain.domain}? This removes its API keys too.`)}
@@ -546,8 +561,21 @@ export async function uiDomain(req: Req): Promise<Response> {
     return html(layout("Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user), { status: 404 });
   }
   const body = detailHead(domain as DomainRow, "overview") +
-    domainOverview(domain as DomainRow & { dns_records?: DnsRecord[] }, flashFrom(req));
+    domainOverview(domain as DomainRow & { dns_records?: DnsRecord[]; mail_from_domain?: string | null }, flashFrom(req));
   return html(layout(domain.domain, body, user));
+}
+
+export async function uiSetMailFrom(req: Req): Promise<Response> {
+  const user = gate(req);
+  if (user instanceof Response) return user;
+  const mailFrom = String((await req.formData()).get("mailFrom") ?? "");
+  try {
+    await updateMailFromDomain(req.params.id, user.id, mailFrom);
+  } catch (err) {
+    console.error("set return-path failed:", err);
+    return seeOther(`/ui/domains/${req.params.id}?m=mailfrom-failed`);
+  }
+  return seeOther(`/ui/domains/${req.params.id}?m=mailfrom-saved`);
 }
 
 export async function uiDomainDns(req: Req): Promise<Response> {

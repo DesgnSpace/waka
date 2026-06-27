@@ -8,6 +8,7 @@ import {
   CreateConfigurationSetCommand,
   VerifyDomainDkimCommand,
   GetIdentityDkimAttributesCommand,
+  SetIdentityMailFromDomainCommand,
 } from "@aws-sdk/client-ses";
 import crypto from "crypto";
 
@@ -69,6 +70,11 @@ function randomBoundary(tag: string): string {
   return `=_${tag}_${crypto.randomBytes(16).toString("hex")}`;
 }
 
+// One account-wide SES configuration set, wired to the SNS topic once in the
+// console. Tagging every send with it routes delivery/bounce/complaint events
+// to SNS for all domains — no per-domain setup, ever. Empty string => untagged.
+const CONFIG_SET = process.env.SES_CONFIGURATION_SET || "waka-events";
+
 export async function sendEmail(options: SendEmailOptions): Promise<string> {
   const { from, to, cc, bcc, subject, html, text, replyTo, tags } = options;
 
@@ -105,6 +111,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<string> {
       },
     },
     ReplyToAddresses: replyTo,
+    ConfigurationSetName: CONFIG_SET || undefined,
     Tags: tags
       ? Object.entries(tags).map(([Name, Value]) => ({ Name, Value }))
       : undefined,
@@ -187,6 +194,7 @@ export async function sendRawEmail(options: SendEmailOptions): Promise<string> {
     Source: from,
     Destinations: recipients,
     RawMessage: { Data: new TextEncoder().encode(lines.join("\r\n")) },
+    ConfigurationSetName: CONFIG_SET || undefined,
   });
 
   const response = await sesClient.send(command);
@@ -288,7 +296,8 @@ export async function createConfigurationSet(domain: string): Promise<string> {
 export function generateDNSRecords(
   domain: string,
   verificationToken: string,
-  dkimTokens: string[] = []
+  dkimTokens: string[] = [],
+  mailFromDomain?: string | null
 ) {
   const records = [
     {
@@ -332,5 +341,45 @@ export function generateDNSRecords(
     });
   });
 
+  // Custom MAIL FROM (return-path) records — only when a return domain is set.
+  if (mailFromDomain) records.push(...mailFromRecords(mailFromDomain));
+
   return records;
+}
+
+// The two records that back a custom MAIL FROM (return-path) subdomain: an MX to
+// the region's feedback host and a relaxed SPF. Aligns SPF for DMARC.
+export function mailFromRecords(mailFromDomain: string) {
+  const region = process.env.AWS_REGION || "us-east-1";
+  return [
+    {
+      type: "MX",
+      name: mailFromDomain,
+      value: `10 feedback-smtp.${region}.amazonses.com.`,
+      ttl: 300,
+      description: "Custom MAIL FROM (return-path)",
+    },
+    {
+      type: "TXT",
+      name: mailFromDomain,
+      value: "v=spf1 include:amazonses.com ~all",
+      ttl: 300,
+      description: "MAIL FROM SPF",
+    },
+  ];
+}
+
+// Set (or clear, when mailFrom is empty) the custom MAIL FROM domain for an
+// identity. Falls back to the SES default domain if the MX record is missing,
+// so misconfigured DNS never blocks sending.
+export async function setMailFromDomain(
+  domain: string,
+  mailFrom: string | null
+): Promise<void> {
+  const command = new SetIdentityMailFromDomainCommand({
+    Identity: domain,
+    MailFromDomain: mailFrom || undefined,
+    BehaviorOnMXFailure: "UseDefaultValue",
+  });
+  await sesClient.send(command);
 }
