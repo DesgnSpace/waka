@@ -5,10 +5,20 @@ import { sendEmail } from "@/lib/ses";
 import { getDomainById } from "@/lib/domains";
 import { query } from "@/lib/database";
 
+const MAX_ATTACHMENTS = 20;
+const MAX_TOTAL_ATTACHMENT_BYTES = 10 * 1024 * 1024; // SES raw-message hard limit
+
+const decodedBase64Bytes = (b64: string) =>
+  Math.floor(b64.replace(/\s+/g, "").length * 0.75);
+
 const attachmentSchema = z.object({
-  filename: z.string(),
-  content: z.string(), // Base64 encoded
-  contentType: z.string().optional(),
+  filename: z.string().min(1).regex(/^[^\r\n"]+$/, "Invalid attachment filename"),
+  content: z
+    .string()
+    .refine((c) => /^[A-Za-z0-9+/]+={0,2}$/.test(c.replace(/\s+/g, "")), {
+      message: "content must be base64",
+    }),
+  contentType: z.string().regex(/^[^\r\n]+$/, "Invalid content type").optional(),
 });
 
 const sendEmailSchema = z
@@ -19,16 +29,27 @@ const sendEmailSchema = z
       .min(1, "At least one recipient is required"),
     cc: z.array(z.string().email("Invalid cc email")).optional(),
     bcc: z.array(z.string().email("Invalid bcc email")).optional(),
-    subject: z.string().min(1, "Subject is required"),
+    subject: z
+      .string()
+      .min(1, "Subject is required")
+      .regex(/^[^\r\n]*$/, "Subject must not contain line breaks"),
     html: z.string().optional(),
     text: z.string().optional(),
-    attachments: z.array(attachmentSchema).optional(),
+    attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS).optional(),
     reply_to: z.array(z.string().email("Invalid reply_to email")).optional(),
     tags: z.record(z.string(), z.string()).optional(),
   })
   .refine((data) => data.html || data.text, {
     message: "Either html or text content is required",
-  });
+  })
+  .refine(
+    (data) =>
+      (data.attachments ?? []).reduce(
+        (sum, a) => sum + decodedBase64Bytes(a.content),
+        0
+      ) <= MAX_TOTAL_ATTACHMENT_BYTES,
+    { message: "Attachments exceed the 10MB total limit" }
+  );
 
 function cors(response: NextResponse) {
   response.headers.set("Access-Control-Allow-Origin", "*");
@@ -59,6 +80,14 @@ export async function POST(request: NextRequest) {
       return cors(NextResponse.json(
         { error: "Invalid API key" },
         { status: 401 }
+      ));
+    }
+
+    // Authorize before doing any work.
+    if (!apiKey.permissions.includes("send")) {
+      return cors(NextResponse.json(
+        { error: "API key does not have send permission" },
+        { status: 403 }
       ));
     }
 
@@ -101,40 +130,33 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    // Check API key permissions
-    if (!apiKey.permissions.includes("send")) {
-      return cors(NextResponse.json(
-        { error: "API key does not have send permission" },
-        { status: 403 }
-      ));
-    }
-
-    // Convert arrays and prepare data for SES
-    const toArray = Array.isArray(to) ? to : [to];
-    const ccArray = cc ? (Array.isArray(cc) ? cc : [cc]) : undefined;
-    const bccArray = bcc ? (Array.isArray(bcc) ? bcc : [bcc]) : undefined;
-    const replyToArray = reply_to ? (Array.isArray(reply_to) ? reply_to : [reply_to]) : undefined;
-    
-    // Convert attachments to match EmailAttachment interface
-    const sesAttachments = attachments?.map(att => ({
+    const sesAttachments = attachments?.map((att) => ({
       filename: att.filename,
       content: att.content,
-      contentType: att.contentType || 'application/octet-stream'
+      contentType: att.contentType || "application/octet-stream",
     }));
 
-    // Send email via SES
+    // Send email via SES (to/cc/bcc/reply_to are already arrays via the schema).
     const messageId = await sendEmail({
       from,
-      to: toArray,
-      cc: ccArray,
-      bcc: bccArray,
-      subject: subject || '',
+      to,
+      cc,
+      bcc,
+      subject,
       html,
       text,
       attachments: sesAttachments,
-      replyTo: replyToArray,
+      replyTo: reply_to,
       tags,
     });
+
+    // Persist attachment metadata only — never the raw base64 payload, which
+    // would bloat the table and store recipient content/PII indefinitely.
+    const attachmentMeta = (attachments ?? []).map((a) => ({
+      filename: a.filename,
+      contentType: a.contentType || "application/octet-stream",
+      size: decodedBase64Bytes(a.content),
+    }));
 
     // Log email in database
     let emailLog = null;
@@ -155,7 +177,7 @@ export async function POST(request: NextRequest) {
           subject,
           html,
           text,
-          JSON.stringify(attachments || []),
+          JSON.stringify(attachmentMeta),
           "sent",
           messageId,
         ]
@@ -172,14 +194,9 @@ export async function POST(request: NextRequest) {
       created_at: new Date().toISOString(),
     }));
   } catch (error: unknown) {
-    // Handle validation errors
-    const errorObj = error as { errors?: unknown; message?: string };
-    if (errorObj.errors || errorObj.message?.includes('validation') || errorObj.message?.includes('parse')) {
+    if (error instanceof z.ZodError) {
       return cors(NextResponse.json(
-        {
-          error: "Invalid request data",
-          details: errorObj.errors || errorObj.message,
-        },
+        { error: "Invalid request data", details: error.issues },
         { status: 400 }
       ));
     }

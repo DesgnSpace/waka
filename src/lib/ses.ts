@@ -9,6 +9,7 @@ import {
   VerifyDomainDkimCommand,
   GetIdentityDkimAttributesCommand,
 } from "@aws-sdk/client-ses";
+import crypto from "crypto";
 
 const sesClient = new SESClient({
   region: process.env.AWS_REGION || "us-east-1",
@@ -40,6 +41,32 @@ export interface SendEmailOptions {
 export interface SESVerificationResult {
   verificationToken: string;
   status: "Pending" | "Success" | "Failed" | "TemporaryFailure" | "NotStarted";
+}
+
+// --- RFC 5322 / 2045 header + MIME helpers -----------------------------------
+// Every value that is interpolated into a header must be CRLF-free, or a caller
+// could inject arbitrary headers / MIME parts (e.g. a smuggled Bcc).
+
+function assertNoCRLF(value: string, field: string): void {
+  if (/[\r\n]/.test(value)) {
+    throw new Error(`Illegal line break in ${field}`);
+  }
+}
+
+// RFC 2047 encoded-word for header values containing non-ASCII (subjects,
+// filenames). ASCII values pass through unchanged.
+function encodeHeaderWord(value: string): string {
+  if (/^[\x20-\x7E]*$/.test(value)) return value;
+  return `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
+}
+
+// Wrap base64 to 76-char lines per RFC 2045.
+function wrapBase64(b64: string): string {
+  return b64.match(/.{1,76}/g)?.join("\r\n") ?? "";
+}
+
+function randomBoundary(tag: string): string {
+  return `=_${tag}_${crypto.randomBytes(16).toString("hex")}`;
 }
 
 export async function sendEmail(options: SendEmailOptions): Promise<string> {
@@ -87,6 +114,10 @@ export async function sendEmail(options: SendEmailOptions): Promise<string> {
   return response.MessageId!;
 }
 
+// Builds a raw multipart MIME message (required by SES for attachments) and
+// sends it. Bodies and attachments are base64-encoded so arbitrary content can
+// never collide with a MIME boundary or break SMTP line-length limits; all
+// header values are CRLF-guarded and non-ASCII ones RFC 2047 encoded.
 export async function sendRawEmail(options: SendEmailOptions): Promise<string> {
   const {
     from,
@@ -100,61 +131,69 @@ export async function sendRawEmail(options: SendEmailOptions): Promise<string> {
     replyTo,
   } = options;
 
-  // Build raw email
-  const boundary = `----=_NextPart_${Date.now()}_${Math.random().toString(36)}`;
-  const recipients = [...to, ...(cc || []), ...(bcc || [])];
-
-  let rawMessage = "";
-
-  // Headers
-  rawMessage += `From: ${from}\r\n`;
-  rawMessage += `To: ${to.join(", ")}\r\n`;
-  if (cc && cc.length > 0) rawMessage += `Cc: ${cc.join(", ")}\r\n`;
-  if (replyTo && replyTo.length > 0)
-    rawMessage += `Reply-To: ${replyTo.join(", ")}\r\n`;
-  rawMessage += `Subject: ${subject}\r\n`;
-  rawMessage += `MIME-Version: 1.0\r\n`;
-  rawMessage += `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n`;
-
-  // Body parts
-  rawMessage += `--${boundary}\r\n`;
-  rawMessage += `Content-Type: multipart/alternative; boundary="${boundary}-alt"\r\n\r\n`;
-
-  if (text) {
-    rawMessage += `--${boundary}-alt\r\n`;
-    rawMessage += `Content-Type: text/plain; charset=UTF-8\r\n\r\n`;
-    rawMessage += `${text}\r\n\r\n`;
+  for (const addr of [from, ...to, ...(cc ?? []), ...(replyTo ?? [])]) {
+    assertNoCRLF(addr, "address");
   }
+  assertNoCRLF(subject, "subject");
 
-  if (html) {
-    rawMessage += `--${boundary}-alt\r\n`;
-    rawMessage += `Content-Type: text/html; charset=UTF-8\r\n\r\n`;
-    rawMessage += `${html}\r\n\r\n`;
+  const mixed = randomBoundary("mixed");
+  const alt = randomBoundary("alt");
+  const recipients = [...to, ...(cc ?? []), ...(bcc ?? [])];
+
+  const lines: string[] = [
+    `From: ${from}`,
+    `To: ${to.join(", ")}`,
+    ...(cc?.length ? [`Cc: ${cc.join(", ")}`] : []),
+    ...(replyTo?.length ? [`Reply-To: ${replyTo.join(", ")}`] : []),
+    `Subject: ${encodeHeaderWord(subject)}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary="${mixed}"`,
+    "",
+    `--${mixed}`,
+    `Content-Type: multipart/alternative; boundary="${alt}"`,
+    "",
+  ];
+
+  const addBodyPart = (contentType: string, body: string) => {
+    lines.push(
+      `--${alt}`,
+      `Content-Type: ${contentType}; charset=UTF-8`,
+      "Content-Transfer-Encoding: base64",
+      "",
+      wrapBase64(Buffer.from(body, "utf8").toString("base64")),
+      ""
+    );
+  };
+  if (text) addBodyPart("text/plain", text);
+  if (html) addBodyPart("text/html", html);
+  lines.push(`--${alt}--`, "");
+
+  for (const att of attachments) {
+    assertNoCRLF(att.filename, "attachment filename");
+    assertNoCRLF(att.contentType, "attachment content type");
+    lines.push(
+      `--${mixed}`,
+      `Content-Type: ${att.contentType}`,
+      `Content-Disposition: attachment; filename="${encodeHeaderWord(att.filename)}"`,
+      "Content-Transfer-Encoding: base64",
+      "",
+      wrapBase64(att.content.replace(/\s+/g, "")),
+      ""
+    );
   }
-
-  rawMessage += `--${boundary}-alt--\r\n`;
-
-  // Attachments
-  for (const attachment of attachments) {
-    rawMessage += `--${boundary}\r\n`;
-    rawMessage += `Content-Type: ${attachment.contentType}\r\n`;
-    rawMessage += `Content-Disposition: attachment; filename="${attachment.filename}"\r\n`;
-    rawMessage += `Content-Transfer-Encoding: base64\r\n\r\n`;
-    rawMessage += `${attachment.content}\r\n`;
-  }
-
-  rawMessage += `--${boundary}--\r\n`;
+  lines.push(`--${mixed}--`, "");
 
   const command = new SendRawEmailCommand({
     Source: from,
     Destinations: recipients,
-    RawMessage: {
-      Data: new TextEncoder().encode(rawMessage),
-    },
+    RawMessage: { Data: new TextEncoder().encode(lines.join("\r\n")) },
   });
 
   const response = await sesClient.send(command);
-  return response.MessageId!;
+  if (!response.MessageId) {
+    throw new Error("SES did not return a MessageId");
+  }
+  return response.MessageId;
 }
 
 export async function verifyDomain(
