@@ -224,7 +224,8 @@ const attachmentSchema = z.object({
       message: "Attachment content must be base64-encoded.",
     }),
   contentType: z.string().regex(/^[^\r\n]+$/, "Invalid content type").optional(),
-});
+  content_type: z.string().regex(/^[^\r\n]+$/, "Invalid content type").optional(), // Resend uses snake_case
+}).passthrough();
 
 // Resend accepts addresses as "addr@host" or "Name <addr@host>", and
 // to/cc/bcc/reply_to as either a single string or an array. Normalize to arrays
@@ -244,11 +245,24 @@ const sendEmailSchema = z
       .string()
       .min(1, "Subject is required.")
       .regex(/^[^\r\n]*$/, "Subject can't contain line breaks."),
-    html: z.string().optional(),
-    text: z.string().optional(),
+    // Some clients send the unused body as null (not omitted) — accept null too.
+    html: z.string().nullish().transform((v) => v ?? undefined),
+    text: z.string().nullish().transform((v) => v ?? undefined),
     attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS).optional(),
     reply_to: z.preprocess(asArray, z.array(addressField).optional()),
-    tags: z.record(z.string(), z.string()).optional(),
+    // Resend tags are [{name,value}]; clients commonly send this key even when
+    // empty ([]). Also accept a legacy { k: v } record. Empty/absent => undefined.
+    tags: z.preprocess(
+      (v) => {
+        if (v == null) return undefined;
+        if (Array.isArray(v)) return v;
+        if (typeof v === "object") {
+          return Object.entries(v as Record<string, unknown>).map(([name, value]) => ({ name, value: String(value) }));
+        }
+        return v;
+      },
+      z.array(z.object({ name: z.string(), value: z.string() })).optional()
+    ),
   })
   .refine((data) => data.html || data.text, {
     message: "Include either html or text content.",
@@ -280,7 +294,7 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
   const sesAttachments = attachments?.map((att) => ({
     filename: att.filename,
     content: att.content,
-    contentType: att.contentType || "application/octet-stream",
+    contentType: att.contentType || att.content_type || "application/octet-stream",
   }));
 
   const messageId = await sendEmail({
@@ -299,7 +313,7 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
   // Persist attachment metadata only — never the raw base64 payload.
   const attachmentMeta = (attachments ?? []).map((a) => ({
     filename: a.filename,
-    contentType: a.contentType || "application/octet-stream",
+    contentType: a.contentType || a.content_type || "application/octet-stream",
     size: decodedBase64Bytes(a.content),
   }));
 

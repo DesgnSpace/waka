@@ -36,7 +36,7 @@ export interface SendEmailOptions {
   text?: string;
   attachments?: EmailAttachment[];
   replyTo?: string[];
-  tags?: Record<string, string>;
+  tags?: Array<{ name: string; value: string }>;
 }
 
 export interface SESVerificationResult {
@@ -112,9 +112,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<string> {
     },
     ReplyToAddresses: replyTo,
     ConfigurationSetName: CONFIG_SET || undefined,
-    Tags: tags
-      ? Object.entries(tags).map(([Name, Value]) => ({ Name, Value }))
-      : undefined,
+    Tags: tags?.length ? tags.map((t) => ({ Name: t.name, Value: t.value })) : undefined,
   });
 
   const response = await sesClient.send(command);
