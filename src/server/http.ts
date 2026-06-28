@@ -78,16 +78,15 @@ function wrap(fn: Handler): Handler {
     } catch (err) {
       if (err instanceof HttpError) return mergeCors(json(err.body, err.status), origin);
       if (err instanceof ZodError) {
-        // Surface the concrete reason (path + message) so API clients — incl. the
-        // Resend SDK, which reads `message` — see what actually failed, not a blanket.
-        const issue = err.issues[0];
-        const path = issue?.path.join(".");
-        const reason = issue
-          ? path
-            ? `${path}: ${issue.message}`
-            : issue.message
-          : "Invalid request data";
-        return mergeCors(json({ error: reason, message: reason, details: err.issues }, 400), origin);
+        // List EVERY failing field (path: message) so API clients — incl. the
+        // Resend SDK, which only reads `message` — see exactly what's wrong.
+        const reasons = err.issues.map((i) => {
+          const path = i.path.join(".");
+          return path ? `${path}: ${i.message}` : i.message;
+        });
+        const reason = reasons.length ? reasons.join("; ") : "Invalid request data";
+        // 422 Unprocessable Entity — same code Resend returns for validation errors.
+        return mergeCors(json({ error: reason, message: reason, details: err.issues }, 422), origin);
       }
       console.error("API error:", err);
       return mergeCors(json({ error: "Internal server error" }, 500), origin);

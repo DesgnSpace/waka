@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { promises as dns } from "node:dns";
 
-import { json, requireUser, requireApiKey, type Req } from "./http";
+import { json, requireUser, requireApiKey, HttpError, type Req } from "./http";
 import { authenticateUser, generateJWT, initializeDefaultUser } from "@/lib/auth";
 import {
   addDomain,
@@ -297,18 +297,31 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
     contentType: att.contentType || att.content_type || "application/octet-stream",
   }));
 
-  const messageId = await sendEmail({
-    from,
-    to,
-    cc,
-    bcc,
-    subject,
-    html,
-    text,
-    attachments: sesAttachments,
-    replyTo: reply_to,
-    tags,
-  });
+  let messageId: string;
+  try {
+    messageId = await sendEmail({
+      from,
+      to,
+      cc,
+      bcc,
+      subject,
+      html,
+      text,
+      attachments: sesAttachments,
+      replyTo: reply_to,
+      tags,
+    });
+  } catch (err) {
+    // Surface the provider's real reason (e.g. "Email address is not verified",
+    // "AccessDenied") instead of a blank 500, so the caller can act on it.
+    const e = err as { name?: string; message?: string; $metadata?: { httpStatusCode?: number } };
+    console.error("SES send failed:", e.name, e.message);
+    const sc = e.$metadata?.httpStatusCode ?? 0;
+    // Pass through the provider's own 4xx (e.g. AccessDenied 403); otherwise 502.
+    const status = sc >= 400 && sc < 500 ? sc : 502;
+    const reason = e.message || "Email provider rejected the message.";
+    throw new HttpError(status, { error: reason, message: reason, code: e.name });
+  }
 
   // Persist attachment metadata only — never the raw base64 payload.
   const attachmentMeta = (attachments ?? []).map((a) => ({
