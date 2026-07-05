@@ -1,3 +1,11 @@
+import * as Sentry from "@sentry/bun";
+
+// Opt-in error telemetry: set SENTRY_DSN to enable, leave unset for a no-op.
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.NODE_ENV ?? "development",
+});
+
 import { methods } from "@/server/http";
 import * as h from "@/server/handlers";
 import { snsWebhook } from "@/server/webhooks";
@@ -8,7 +16,13 @@ const port = Number(process.env.PORT ?? 3000);
 
 // Apply pending schema migrations before accepting traffic. Fail fast: a
 // half-migrated schema serving requests is worse than a failed deploy.
-await migrate();
+try {
+  await migrate();
+} catch (err) {
+  Sentry.captureException(err);
+  await Sentry.flush(2000);
+  throw err;
+}
 
 // Drop-in replacement for the previous Next.js app: identical /api/* paths,
 // JSON shapes, auth, and env, plus an HTMX dashboard. Business logic is reused
@@ -53,6 +67,7 @@ const server = Bun.serve({
   },
   error(err: unknown) {
     console.error("Unhandled server error:", err);
+    Sentry.captureException(err);
     return Response.json({ error: "Internal server error" }, { status: 500 });
   },
 });

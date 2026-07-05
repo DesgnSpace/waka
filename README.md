@@ -66,6 +66,9 @@ DO_API_TOKEN=your-digitalocean-api-token
 # Application Configuration
 ADMIN_EMAIL=admin@yourdomain.com
 ADMIN_PASSWORD=your-secure-admin-password
+
+# Error telemetry (optional) — set a Sentry DSN to enable, leave unset to disable
+SENTRY_DSN=
 ```
 
 3. **Set up the database:**

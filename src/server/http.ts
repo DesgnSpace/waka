@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/bun";
 import { ZodError } from "zod";
 import { verifyJWT, type AuthUser } from "@/lib/auth";
 import { verifyApiKey } from "@/lib/api-keys";
@@ -89,6 +90,10 @@ function wrap(fn: Handler): Handler {
         return mergeCors(json({ error: reason, message: reason, details: err.issues }, 422), origin);
       }
       console.error("API error:", err);
+      Sentry.withScope((scope) => {
+        scope.setContext("request", { method: req.method, url: req.url });
+        Sentry.captureException(err);
+      });
       return mergeCors(json({ error: "Internal server error" }, 500), origin);
     }
   };
