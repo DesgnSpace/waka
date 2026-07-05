@@ -70,7 +70,7 @@ ADMIN_PASSWORD=your-secure-admin-password
 
 3. **Set up the database:**
 
-In your Supabase SQL editor, run the contents of `database.sql` to create all necessary tables.
+No manual step. Migrations in `migrations/` run automatically when the server starts — tables are created (and future schema changes applied) on boot. Applied migrations are tracked in the `schema_migrations` table.
 
 4. **Start the development server:**
 

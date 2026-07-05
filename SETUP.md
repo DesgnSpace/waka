@@ -26,12 +26,7 @@ This guide will help you set up Waka from scratch.
 
 3. **Initialize database schema:**
 
-   ```bash
-   # Run the schema
-   psql $DATABASE_URL -f database.sql
-
-   # Or copy contents of database.sql and run in your PostgreSQL client
-   ```
+   Automatic. The server applies migrations from `migrations/` at startup; no manual SQL needed. The database only needs to exist and be reachable via `DATABASE_URL`.
 
 ### AWS SES Setup
 
@@ -234,5 +229,5 @@ Value: v=DMARC1; p=quarantine; rua=mailto:dmarc@yourdomain.com
 ## 9. Support
 
 - Check the main README.md for API documentation
-- Review the database.sql for schema details
+- Review `migrations/` for schema details
 - Look at the code in `/src/lib/` for implementation details

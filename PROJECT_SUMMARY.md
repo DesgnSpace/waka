@@ -157,7 +157,7 @@ Essential configuration:
 
 1. **Setup Services**: Supabase + AWS SES + (optional) Digital Ocean
 2. **Configure Environment**: Copy .env.local.example
-3. **Initialize Database**: Run database.sql in Supabase
+3. **Initialize Database**: Automatic — migrations run at server startup
 4. **Install & Run**: npm install && npm run dev
 5. **Create Admin**: POST /api/setup
 6. **Add Domain**: Use dashboard to add first domain

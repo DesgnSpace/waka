@@ -2,8 +2,13 @@ import { methods } from "@/server/http";
 import * as h from "@/server/handlers";
 import { snsWebhook } from "@/server/webhooks";
 import * as ui from "@/server/ui";
+import { migrate } from "@/lib/migrate";
 
 const port = Number(process.env.PORT ?? 3000);
+
+// Apply pending schema migrations before accepting traffic. Fail fast: a
+// half-migrated schema serving requests is worse than a failed deploy.
+await migrate();
 
 // Drop-in replacement for the previous Next.js app: identical /api/* paths,
 // JSON shapes, auth, and env, plus an HTMX dashboard. Business logic is reused

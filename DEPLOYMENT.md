@@ -18,10 +18,8 @@
 - **Neon**: [neon.tech](https://neon.tech) - Free tier available
 
 **Database Schema:**
-```sql
--- Run the contents of database.sql in your PostgreSQL database
--- This creates all necessary tables and indexes
-```
+
+Applied automatically: the server runs migrations from `migrations/` at startup, creating all tables and indexes.
 
 ### 2. Environment Variables
 
@@ -84,10 +82,8 @@ vercel env add DATABASE_URL
 ### 5. Post-Deployment Setup
 
 **Database Initialization:**
-```bash
-# Connect to your database and run:
-psql DATABASE_URL < database.sql
-```
+
+Automatic on first boot — the server applies `migrations/` before accepting traffic.
 
 **Verify Deployment:**
 1. Visit your deployed URL

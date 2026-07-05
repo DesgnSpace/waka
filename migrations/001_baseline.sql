@@ -1,6 +1,7 @@
--- Waka Database Schema
+-- Baseline schema. Idempotent: safe on fresh databases and on existing
+-- production databases created from the old database.sql (IF NOT EXISTS
+-- everywhere, ALTERs for columns added after the original schema).
 
--- Users table
 CREATE TABLE IF NOT EXISTS users (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   email VARCHAR(255) UNIQUE NOT NULL,
@@ -10,7 +11,6 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Domains table
 CREATE TABLE IF NOT EXISTS domains (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -27,7 +27,10 @@ CREATE TABLE IF NOT EXISTS domains (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- API Keys table
+-- Columns added after the original schema; no-ops on fresh installs.
+ALTER TABLE domains ADD COLUMN IF NOT EXISTS ses_configuration_set VARCHAR(255);
+ALTER TABLE domains ADD COLUMN IF NOT EXISTS mail_from_domain VARCHAR(255);
+
 CREATE TABLE IF NOT EXISTS api_keys (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -42,7 +45,6 @@ CREATE TABLE IF NOT EXISTS api_keys (
   UNIQUE(user_id, key_name)
 );
 
--- Email logs table
 CREATE TABLE IF NOT EXISTS email_logs (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   api_key_id UUID REFERENCES api_keys(id) ON DELETE SET NULL,
@@ -76,7 +78,6 @@ CREATE TABLE IF NOT EXISTS email_events (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Webhook events table
 CREATE TABLE IF NOT EXISTS webhook_events (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   email_log_id UUID REFERENCES email_logs(id) ON DELETE CASCADE,
@@ -86,7 +87,6 @@ CREATE TABLE IF NOT EXISTS webhook_events (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_domains_user_id ON domains(user_id);
 CREATE INDEX IF NOT EXISTS idx_domains_domain ON domains(domain);
 CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
@@ -110,24 +110,19 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Create triggers for updated_at automation
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users 
+-- DROP + CREATE keeps trigger creation idempotent (no CREATE TRIGGER IF NOT EXISTS in PG).
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_domains_updated_at BEFORE UPDATE ON domains 
+DROP TRIGGER IF EXISTS update_domains_updated_at ON domains;
+CREATE TRIGGER update_domains_updated_at BEFORE UPDATE ON domains
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_api_keys_updated_at BEFORE UPDATE ON api_keys 
+DROP TRIGGER IF EXISTS update_api_keys_updated_at ON api_keys;
+CREATE TRIGGER update_api_keys_updated_at BEFORE UPDATE ON api_keys
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_email_logs_updated_at ON email_logs;
 CREATE TRIGGER update_email_logs_updated_at BEFORE UPDATE ON email_logs
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
--- Initial data: Create default admin user (password: changeme123)
--- Note: Change this password after first login!
-INSERT INTO users (email, password_hash, name) 
-VALUES (
-  'admin@waka.com', 
-  '$2b$10$rHOuGCOB2xzvf1YqnHjlUuB9AKnp.xeL0JOV5E7zlM1QIFhW7qYGS', 
-  'Admin User'
-) ON CONFLICT (email) DO NOTHING;
