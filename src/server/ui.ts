@@ -1,8 +1,15 @@
 import crypto from "crypto";
+import { z } from "zod";
 import {
   sessionUser,
   sessionCookie,
   clearSessionCookie,
+  createCsrfToken,
+  csrfCookie,
+  clearCsrfCookie,
+  getCsrfToken,
+  isValidCsrfToken,
+  pathUuid,
   type Req,
 } from "./http";
 import { authenticateUser, generateJWT, type AuthUser } from "@/lib/auth";
@@ -16,6 +23,7 @@ import {
 } from "@/lib/domains";
 import { getDomainApiKeys, generateApiKey, deleteApiKey } from "@/lib/api-keys";
 import { query } from "@/lib/database";
+import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 
 // --- helpers -----------------------------------------------------------------
 
@@ -37,8 +45,33 @@ function html(body: string, init: ResponseInit = {}): Response {
   });
 }
 
-function seeOther(location: string, extraHeaders: Record<string, string> = {}): Response {
-  return new Response("", { status: 303, headers: { Location: location, ...extraHeaders } });
+function seeOther(location: string, extraHeaders: HeadersInit = {}): Response {
+  const headers = new Headers(extraHeaders);
+  headers.set("Location", location);
+  return new Response("", { status: 303, headers });
+}
+
+function renderPage(
+  req: Req,
+  title: string,
+  body: string,
+  user?: AuthUser | null,
+  init: ResponseInit = {},
+): Response {
+  const existingToken = getCsrfToken(req);
+  const csrf = existingToken ?? createCsrfToken();
+  const response = html(layout(title, body, user, csrf), init);
+  if (!existingToken) response.headers.append("Set-Cookie", csrfCookie(csrf));
+  return response;
+}
+
+async function csrfForm(req: Request): Promise<FormData | null> {
+  const form = await req.formData();
+  return isValidCsrfToken(req, form.get("csrf")) ? form : null;
+}
+
+function forbidden(): Response {
+  return new Response("Forbidden", { status: 403 });
 }
 
 function redirectToLogin(): Response {
@@ -311,7 +344,7 @@ const CSP = [
 
 // --- layout ------------------------------------------------------------------
 
-function topBar(user?: AuthUser | null): string {
+function topBar(user: AuthUser | null | undefined): string {
   if (!user) return "";
   return `<div class="top">
     <a class="brand" href="/dashboard">waka</a>
@@ -324,14 +357,21 @@ function topBar(user?: AuthUser | null): string {
   </div>`;
 }
 
-function layout(title: string, body: string, user?: AuthUser | null): string {
+function layout(title: string, body: string, user?: AuthUser | null, csrf = ""): string {
+  const pageBody = `${topBar(user)}${body}`;
+  const protectedBody = csrf
+    ? pageBody.replace(
+        /<form\b(?=[^>]*\bmethod\s*=\s*["']post["'])[^>]*>/gi,
+        (openingForm) => `${openingForm}<input type="hidden" name="csrf" value="${esc(csrf)}">`,
+      )
+    : pageBody;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · waka</title>
 <script src="${HTMX_SRC}" integrity="${HTMX_SRI}" crossorigin="anonymous"></script>
 <style>${STYLE}</style>
 <script>${APP_SCRIPT}</script>
-</head><body hx-boost="true"><div class="wrap">${topBar(user)}${body}</div>
+</head><body hx-boost="true"><div class="wrap">${protectedBody}</div>
 <div id="cpop" popover class="cpop" aria-labelledby="cpop-q">
   <p id="cpop-q" class="cpop-q"></p>
   <div class="cpop-actions">
@@ -361,7 +401,7 @@ function crumbs(parts: Array<{ label: string; href?: string }>): string {
 
 export function loginPage(req: Req): Response {
   if (sessionUser(req)) return seeOther("/dashboard");
-  return html(layout("Sign in", loginView()));
+  return renderPage(req, "Sign in", loginView());
 }
 
 function loginView(error = ""): string {
@@ -378,17 +418,41 @@ function loginView(error = ""): string {
 }
 
 export async function doLogin(req: Req): Promise<Response> {
-  const form = await req.formData();
-  const user = await authenticateUser(
-    String(form.get("email") ?? ""),
-    String(form.get("password") ?? "")
-  );
-  if (!user) return html(layout("Sign in", loginView("Invalid email or password.")));
-  return seeOther("/dashboard", { "Set-Cookie": sessionCookie(generateJWT(user)) });
+  const form = await csrfForm(req);
+  if (!form) return forbidden();
+  const parsed = z.object({
+    email: z.string().email().max(255),
+    password: z.string().min(1).max(200).refine(
+      (value) => Buffer.byteLength(value, "utf8") <= 72,
+      "Password is too long",
+    ),
+  }).safeParse({
+    email: String(form.get("email") ?? "").trim().toLowerCase(),
+    password: String(form.get("password") ?? ""),
+  });
+  if (!parsed.success) {
+    return renderPage(req, "Sign in", loginView("Invalid email or password."), null, { status: 400 });
+  }
+  const ipRate = await checkRateLimit(`auth:login:${requestAddress(req)}`, 10, 60_000);
+  const emailRate = await checkRateLimit(`auth:login:${parsed.data.email}`, 10, 60_000);
+  if (!ipRate.allowed || !emailRate.allowed) {
+    return renderPage(req, "Sign in", loginView("Try again later."), null, { status: 429 });
+  }
+  const { email, password } = parsed.data;
+  const user = await authenticateUser(email, password);
+  if (!user) return renderPage(req, "Sign in", loginView("Invalid email or password."));
+  const headers = new Headers();
+  headers.append("Set-Cookie", sessionCookie(generateJWT(user)));
+  headers.append("Set-Cookie", csrfCookie(createCsrfToken()));
+  return seeOther("/dashboard", headers);
 }
 
-export function logout(): Response {
-  return seeOther("/login", { "Set-Cookie": clearSessionCookie() });
+export async function logout(req: Req): Promise<Response> {
+  if (!(await csrfForm(req))) return forbidden();
+  const response = seeOther("/login");
+  response.headers.append("Set-Cookie", clearSessionCookie());
+  response.headers.append("Set-Cookie", clearCsrfCookie());
+  return response;
 }
 
 export function home(req: Req): Response {
@@ -450,7 +514,7 @@ export async function dashboard(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
   const domains = await getUserDomains(user.id);
-  return html(layout("domains", domainsView(domains as DomainRow[], flashFrom(req)), user));
+  return renderPage(req, "domains", domainsView(domains as DomainRow[], flashFrom(req)), user);
 }
 
 // /ui/domains GET is an alias kept for old links; list lives at /dashboard.
@@ -461,10 +525,12 @@ export function uiDomains(): Response {
 export async function uiAddDomain(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = String((await req.formData()).get("domain") ?? "").trim();
+  const form = await csrfForm(req);
+  if (!form) return forbidden();
+  const domain = String(form.get("domain") ?? "").trim();
   if (!domain) return seeOther("/dashboard?m=domain-required");
   try {
-    const result = (await addDomain(user.id, domain)) as { domain: { id: string } };
+    const result = await addDomain(user.id, domain);
     return seeOther(`/ui/domains/${result.domain.id}`);
   } catch (err) {
     console.error("add domain failed:", err);
@@ -475,8 +541,10 @@ export async function uiAddDomain(req: Req): Promise<Response> {
 export async function uiDeleteDomain(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
+  if (!(await csrfForm(req))) return forbidden();
+  const domainId = pathUuid(req);
   try {
-    await deleteDomain(req.params.id, user.id);
+    await deleteDomain(domainId, user.id);
   } catch (err) {
     console.error("delete domain failed:", err);
   }
@@ -486,9 +554,11 @@ export async function uiDeleteDomain(req: Req): Promise<Response> {
 export async function uiVerifyDomain(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) return seeOther("/dashboard");
-  const status = await checkDomainVerification(req.params.id);
+  if (!(await csrfForm(req))) return forbidden();
+  const domainId = pathUuid(req);
+  const domain = await getDomainById(domainId, user.id);
+  if (!domain) return seeOther("/dashboard");
+  const status = await checkDomainVerification(domainId, user.id);
   return seeOther(`/ui/domains/${domain.id}?m=${status === "verified" ? "verified" : "pending"}`);
 }
 
@@ -555,40 +625,43 @@ function domainOverview(
 export async function uiDomain(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) {
-    return html(layout("Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user), { status: 404 });
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) {
+    return renderPage(req, "Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user, { status: 404 });
   }
   const body = detailHead(domain as DomainRow, "overview") +
     domainOverview(domain as DomainRow & { dns_records?: DnsRecord[]; mail_from_domain?: string | null }, flashFrom(req));
-  return html(layout(domain.domain, body, user));
+  return renderPage(req, domain.domain, body, user);
 }
 
 export async function uiSetMailFrom(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const mailFrom = String((await req.formData()).get("mailFrom") ?? "");
+  const domainId = pathUuid(req);
+  const form = await csrfForm(req);
+  if (!form) return forbidden();
+  const mailFrom = String(form.get("mailFrom") ?? "");
   try {
-    await updateMailFromDomain(req.params.id, user.id, mailFrom);
+    await updateMailFromDomain(domainId, user.id, mailFrom);
   } catch (err) {
     // Fail loud: re-render the overview with the real reason (bad subdomain,
     // missing ses:SetIdentityMailFromDomain permission, SES error, …).
     console.error("set return-path failed:", err);
-    const domain = await getDomainById(req.params.id);
-    if (!domain || domain.user_id !== user.id) return seeOther("/dashboard");
+    const domain = await getDomainById(domainId, user.id);
+    if (!domain) return seeOther("/dashboard");
     const msg = err instanceof Error ? err.message : "Could not set the return-path domain.";
     const body = detailHead(domain as DomainRow, "overview") +
       domainOverview(domain as DomainRow & { dns_records?: DnsRecord[]; mail_from_domain?: string | null }, alert("err", msg));
-    return html(layout(domain.domain, body, user), { status: 400 });
+    return renderPage(req, domain.domain, body, user, { status: 400 });
   }
-  return seeOther(`/ui/domains/${req.params.id}?m=mailfrom-saved`);
+  return seeOther(`/ui/domains/${domainId}?m=mailfrom-saved`);
 }
 
 export async function uiDomainDns(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) {
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) {
     return new Response("Domain not found", { status: 404 });
   }
   const records: DnsRecord[] = Array.isArray(domain.dns_records) ? (domain.dns_records as DnsRecord[]) : [];
@@ -680,16 +753,16 @@ function domainLogsView(logs: Array<{ id: string; from_email: string; to_emails:
 export async function uiDomainLogs(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) {
-    return html(layout("Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user), { status: 404 });
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) {
+    return renderPage(req, "Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user, { status: 404 });
   }
   const logs = await getDomainEmailLogs(user.id, domain.id);
   const body = `${crumbs([{ label: "domains", href: "/dashboard" }, { label: domain.domain, href: `/ui/domains/${esc(domain.id)}` }, { label: "logs" }])}
     <h1>${esc(domain.domain)} ${verifyDot(domain.status)}</h1>
     ${detailTabs(domain as DomainRow, "logs")}
     ${domainLogsView(logs)}`;
-  return html(layout(`${domain.domain} logs`, body, user));
+  return renderPage(req, `${domain.domain} logs`, body, user);
 }
 
 // --- api keys ----------------------------------------------------------------
@@ -734,28 +807,30 @@ function keysBody(domain: DomainRow, keys: unknown, banner = ""): string {
 export async function uiDomainKeys(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) {
-    return html(layout("Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user), { status: 404 });
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) {
+    return renderPage(req, "Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user, { status: 404 });
   }
-  const keys = await getDomainApiKeys(domain.id);
-  return html(layout(`${domain.domain} keys`, keysBody(domain as DomainRow, keys, flashFrom(req)), user));
+  const keys = await getDomainApiKeys(domain.id, user.id);
+  return renderPage(req, `${domain.domain} keys`, keysBody(domain as DomainRow, keys, flashFrom(req)), user);
 }
 
 export async function uiCreateDomainKey(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) {
-    return html(layout("Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user), { status: 404 });
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) {
+    return renderPage(req, "Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user, { status: 404 });
   }
-  const keyName = String((await req.formData()).get("keyName") ?? "").trim();
+  const form = await csrfForm(req);
+  if (!form) return forbidden();
+  const keyName = String(form.get("keyName") ?? "").trim().slice(0, 255);
   let banner = "";
   try {
     if (domain.status !== "verified") banner = alert("err", "Domain must be verified first.");
     else if (!keyName) banner = alert("err", "Key name is required.");
     else {
-      const created = (await generateApiKey(user.id, domain.id, keyName)) as { key: string };
+      const created = await generateApiKey(user.id, domain.id, keyName);
       banner = `<div class="block">
         <div class="block-title">Copy this key now — it is not shown again</div>
         <div class="keyout">${copyBtn(created.key, "Copy API key")}<code>${esc(created.key)}</code></div>
@@ -764,17 +839,18 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
   } catch (err) {
     banner = alert("err", err instanceof Error ? err.message : "Failed to create key.");
   }
-  const keys = await getDomainApiKeys(domain.id);
-  return html(layout(`${domain.domain} keys`, keysBody(domain as DomainRow, keys, banner), user));
+  const keys = await getDomainApiKeys(domain.id, user.id);
+  return renderPage(req, `${domain.domain} keys`, keysBody(domain as DomainRow, keys, banner), user);
 }
 
 export async function uiDeleteDomainKey(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) return seeOther("/dashboard");
+  if (!(await csrfForm(req))) return forbidden();
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) return seeOther("/dashboard");
   try {
-    await deleteApiKey(req.params.keyId, user.id);
+    await deleteApiKey(pathUuid(req, "keyId"), user.id);
   } catch (err) {
     console.error("delete key failed:", err);
   }
