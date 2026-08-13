@@ -1,297 +1,50 @@
-# PostgreSQL in Kubernetes for Waka
+# PostgreSQL in Kubernetes
 
-This setup deploys PostgreSQL inside your Kubernetes cluster alongside the Waka application.
+This optional setup runs one PostgreSQL 16 pod with one persistent volume in the `waka` namespace. It is useful for a small test cluster. It is not a high-availability production database. A managed PostgreSQL service is safer for production backups and failover.
 
-## Benefits
+The PVC uses the DigitalOcean `do-block-storage` storage class from `03-pvc.yaml`. Change `storageClassName` for another Kubernetes provider.
 
-- **No connection limits**: Full control over PostgreSQL configuration
-- **Lower latency**: Database runs in the same cluster as the app
-- **Cost savings**: No external database service fees
-- **Data sovereignty**: Complete control over your data
+## Files
 
-## Architecture
+- `01-namespace.yaml`: the `waka` namespace.
+- `02-secrets.yaml`: PostgreSQL username, password, and connection string template.
+- `03-pvc.yaml`: 10 GiB persistent volume claim.
+- `04-statefulset.yaml`: one PostgreSQL 16 pod.
+- `05-service.yaml`: internal service named `postgres-service`.
 
-```
-┌─────────────────────────────────────┐
-│    Kubernetes Cluster (waka) │
-│                                     │
-│  ┌──────────────┐  ┌─────────────┐ │
-│  │  Waka  │  │  PostgreSQL │ │
-│  │  App (x2)    │──│  StatefulSet│ │
-│  │              │  │             │ │
-│  └──────────────┘  └─────────────┘ │
-│         │                  │        │
-│    ┌────────┐      ┌──────────┐    │
-│    │Service │      │ PVC (10Gi)│   │
-│    └────────┘      └──────────┘    │
-└─────────────────────────────────────┘
-```
+The app migration in `migrations/001_baseline.sql` is the database schema source of truth. PostgreSQL does not load an application schema ConfigMap in this setup. FreeResend applies the migration when the app starts.
 
-## Files Overview
+## Deploy
 
-1. **01-namespace.yaml** - Creates `waka` namespace
-2. **02-secrets.yaml** - Database credentials and app secrets
-3. **03-pvc.yaml** - 10Gi persistent storage for database
-4. **04-statefulset.yaml** - PostgreSQL 16 deployment
-5. **05-service.yaml** - Internal cluster service
-6. **06-configmap.yaml** - Database schema initialization
+1. Replace `POSTGRES_PASSWORD` and the password in `DATABASE_URL` in `02-secrets.yaml`. URL-encode reserved characters in the connection string password.
+2. Apply the database resources:
 
-## Deployment Steps
-
-### 1. Update Secrets (IMPORTANT!)
-
-Edit `02-secrets.yaml` and update:
-- `POSTGRES_PASSWORD` - Choose a secure password
-- `DATABASE_URL` - Update with your chosen password
-- AWS credentials
-- Other app secrets
-
-### 2. Deploy PostgreSQL
-
-```bash
-# Deploy all PostgreSQL resources
-kubectl apply -f k8s/postgres/
-
-# Watch deployment
-kubectl get pods -n waka -w
-
-# Check logs
-kubectl logs -n waka postgres-0 -f
-```
-
-### 3. Verify Database
-
-```bash
-# Connect to PostgreSQL pod
-kubectl exec -it -n waka postgres-0 -- psql -U waka -d waka
-
-# Inside psql, check tables:
-\dt
-
-# Exit
-\q
-```
-
-### 4. Update App Deployment
-
-The app deployment in `/k8s/secret.yaml` has already been updated to use:
-```
-postgresql://waka:PASSWORD@postgres-service.waka.svc.cluster.local:5432/waka
-```
-
-### 5. Deploy/Redeploy App
-
-```bash
-# Update secrets
-kubectl apply -f k8s/secret.yaml
-
-# Restart app to pick up new DATABASE_URL
-kubectl rollout restart deployment/waka -n waka
-
-# Watch rollout
-kubectl rollout status deployment/waka -n waka
-```
-
-## Database Management
-
-### Backup
-
-```bash
-# Create backup
-kubectl exec -n waka postgres-0 -- \
-  pg_dump -U waka waka > backup-$(date +%Y%m%d).sql
-
-# Verify backup
-ls -lh backup-*.sql
-```
-
-### Restore
-
-```bash
-# Restore from backup
-kubectl exec -i -n waka postgres-0 -- \
-  psql -U waka -d waka < backup-20250101.sql
-```
-
-### Access Database
-
-```bash
-# Port forward to access locally
-kubectl port-forward -n waka svc/postgres-service 5432:5432
-
-# Connect with local psql
-psql postgresql://waka:PASSWORD@localhost:5432/waka
-```
-
-### Scale Storage (if needed)
-
-To increase storage from 10Gi:
-
-1. Edit the PVC:
    ```bash
-   kubectl edit pvc postgres-pvc -n waka
+   kubectl apply -f k8s/postgres/01-namespace.yaml
+   kubectl apply -f k8s/postgres/02-secrets.yaml
+   kubectl apply -f k8s/postgres/03-pvc.yaml
+   kubectl apply -f k8s/postgres/04-statefulset.yaml
+   kubectl apply -f k8s/postgres/05-service.yaml
+   kubectl wait --for=condition=ready pod/postgres-0 -n waka --timeout=300s
    ```
 
-2. Update the `spec.resources.requests.storage` value
+3. Set the app `DATABASE_URL` to:
 
-3. The volume will expand automatically (if your storage class supports it)
+   ```text
+   postgresql://waka:URL_ENCODED_PASSWORD@postgres-service.waka.svc.cluster.local:5432/waka?sslmode=disable
+   ```
 
-## Monitoring
+4. Create the app secret from `k8s/secret.template.yaml`, set its `DATABASE_SSL` to `false`, and deploy the app from [../README.md](../README.md).
 
-### Check Database Status
+The database secret is not the app secret. The app Deployment reads `waka-secrets`, not `postgres-secret`.
 
-```bash
-# Pod status
-kubectl get statefulset -n waka postgres
-
-# Pod details
-kubectl describe pod -n waka postgres-0
-
-# Database logs
-kubectl logs -n waka postgres-0 --tail=50
-```
-
-### Check Connections
+## Status and backup
 
 ```bash
-kubectl exec -n waka postgres-0 -- \
-  psql -U waka -d waka -c \
-  "SELECT count(*) FROM pg_stat_activity WHERE datname='waka';"
+kubectl get statefulset postgres -n waka
+kubectl get pvc postgres-pvc -n waka
+kubectl logs postgres-0 -n waka
+kubectl exec -it postgres-0 -n waka -- psql -U waka -d waka
 ```
 
-### Check Storage Usage
-
-```bash
-kubectl exec -n waka postgres-0 -- \
-  df -h /var/lib/postgresql/data
-```
-
-## Troubleshooting
-
-### Pod Won't Start
-
-```bash
-# Check events
-kubectl describe pod -n waka postgres-0
-
-# Check PVC binding
-kubectl get pvc -n waka
-```
-
-### Connection Refused
-
-```bash
-# Verify service
-kubectl get svc -n waka postgres-service
-
-# Test connection from app pod
-kubectl exec -n waka deployment/waka -- \
-  nc -zv postgres-service.waka.svc.cluster.local 5432
-```
-
-### Initialization Failed
-
-```bash
-# Check init logs
-kubectl logs -n waka postgres-0 | grep -A 20 "init"
-
-# Manually run init script
-kubectl exec -n waka postgres-0 -- \
-  psql -U waka -d waka -f /docker-entrypoint-initdb.d/init.sql
-```
-
-## Migration from External Database
-
-If migrating from an existing external database:
-
-```bash
-# 1. Backup external database
-pg_dump YOUR_EXTERNAL_DB > migration-backup.sql
-
-# 2. Deploy new PostgreSQL in K8s (steps above)
-
-# 3. Restore to new database
-kubectl exec -i -n waka postgres-0 -- \
-  psql -U waka -d waka < migration-backup.sql
-
-# 4. Update app secrets and restart
-kubectl apply -f k8s/secret.yaml
-kubectl rollout restart deployment/waka -n waka
-
-# 5. Verify app works with new database
-kubectl logs -n waka deployment/waka
-
-# 6. Once verified, decommission external database
-```
-
-## Production Considerations
-
-### High Availability
-
-For production, consider:
-- Multiple PostgreSQL replicas with replication
-- Use a StatefulSet with 3 replicas
-- Implement connection pooling (PgBouncer)
-- Regular automated backups
-
-### Performance Tuning
-
-Edit StatefulSet to increase resources:
-```yaml
-resources:
-  requests:
-    memory: "1Gi"
-    cpu: "500m"
-  limits:
-    memory: "2Gi"
-    cpu: "2000m"
-```
-
-### Backup Strategy
-
-Set up automated backups with CronJob:
-```yaml
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: postgres-backup
-  namespace: waka
-spec:
-  schedule: "0 2 * * *"  # Daily at 2 AM
-  jobTemplate:
-    spec:
-      template:
-        spec:
-          containers:
-          - name: backup
-            image: postgres:16-alpine
-            command:
-            - /bin/sh
-            - -c
-            - pg_dump -U waka -h postgres-service waka > /backup/backup-$(date +\%Y\%m\%d).sql
-            volumeMounts:
-            - name: backup-storage
-              mountPath: /backup
-          volumes:
-          - name: backup-storage
-            persistentVolumeClaim:
-              claimName: backup-pvc
-```
-
-## Security
-
-- Change default passwords in `02-secrets.yaml`
-- Use Kubernetes secrets encryption at rest
-- Restrict network policies if needed
-- Regular security updates (use `postgres:16-alpine` for smaller attack surface)
-
-## Cost Comparison
-
-**Before (External DB):**
-- DigitalOcean Managed DB: ~$15-30/month
-
-**After (In-cluster):**
-- 10Gi block storage: ~$1/month
-- Minimal compute overhead (already running cluster)
-
-**Savings:** ~$14-29/month
+Back up the database before upgrades. This StatefulSet has one replica and one volume; a pod restart does not provide database failover.

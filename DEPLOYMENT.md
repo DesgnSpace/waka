@@ -1,187 +1,115 @@
-# Waka Deployment Guide
+# Deployment
 
-## Quick Deploy to Vercel
+FreeResend is a long-running Bun HTTP server. The repository supports Docker Compose and Kubernetes. It does not support the old Vercel, Next.js, or Node.js deployment instructions that were previously in this file.
 
-### Prerequisites
-- Vercel account
-- GitHub repository (recommended)
-- PostgreSQL database (managed service recommended)
-- AWS SES account configured
-- Domain name (optional)
+Read [SETUP.md](SETUP.md) for the environment variable table, SES permissions, SES sandbox, DNS, and webhook setup. This file only covers deployment.
 
-### 1. Database Setup
+## Docker Compose
 
-**Recommended Services:**
-- **Railway**: [railway.app](https://railway.app) - $5/month
-- **Supabase**: [supabase.com](https://supabase.com) - Free tier available
-- **PlanetScale**: [planetscale.com](https://planetscale.com) - Free tier available
-- **Neon**: [neon.tech](https://neon.tech) - Free tier available
+`docker-compose.yml` starts a PostgreSQL 16 container and the FreeResend API. The API runs migrations before it accepts requests.
 
-**Database Schema:**
+1. Create the environment file:
 
-Applied automatically: the server runs migrations from `migrations/` at startup, creating all tables and indexes.
+   ```bash
+   cp .env.example .env
+   ```
 
-### 2. Environment Variables
+2. Set real values in `.env`, including `NEXTAUTH_SECRET`, both admin values, and the three AWS values.
 
-Set these in Vercel Dashboard or using Vercel CLI:
+3. Start the stack:
+
+   ```bash
+   docker compose up --build -d
+   ```
+
+4. Check the API:
+
+   ```bash
+   curl http://localhost:3000/api/health
+   docker compose ps
+   ```
+
+For production:
+
+- Publish port `3000` through an HTTPS reverse proxy or load balancer.
+- Use a strong `NEXTAUTH_SECRET` and a strong PostgreSQL password.
+- Use `NODE_ENV=production` so the dashboard cookie is marked `Secure`.
+- Set `DATABASE_SSL=require` when the database endpoint requires verified TLS.
+- Store `.env` outside source control. `.env` is ignored and is not copied into the image.
+- Replace the local PostgreSQL service with a managed PostgreSQL service when you need backups and high availability; set `DATABASE_URL` to that service.
+- Set `DOMAIN` or `CORS_ORIGIN` only when browser clients need cross-origin access.
+- Configure the SES SNS webhook with the public HTTPS URL described in [SETUP.md](SETUP.md).
+
+Stop the stack with `docker compose down`. Add `-v` only when you intend to delete the local PostgreSQL data volume.
+
+## Kubernetes
+
+The manifests in `k8s/` deploy the API behind a ClusterIP service and an NGINX Ingress. The checked-in `deployment.yaml` uses a placeholder image name. Change it to an image in your registry before applying it.
+
+Required cluster components:
+
+- A Kubernetes cluster and configured `kubectl`.
+- A container registry where the image can be pushed.
+- An Ingress controller that supports `ingressClassName: nginx`.
+- A TLS provider such as cert-manager if you keep the TLS annotations.
+- A metrics server if you apply `k8s/hpa.yaml`.
+- PostgreSQL, either a managed endpoint or the optional in-cluster manifests in `k8s/postgres/`.
+
+Build and push an image. Use a pinned tag instead of `latest` for production:
 
 ```bash
-# Required Variables
-NEXTAUTH_URL=https://your-domain.vercel.app
-NEXTAUTH_SECRET=your-64-character-secret-key
-DATABASE_URL=postgresql://user:pass@host:port/db
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=AKIA...
-AWS_SECRET_ACCESS_KEY=...
-ADMIN_EMAIL=admin@yourdomain.com
-ADMIN_PASSWORD=secure-password
-
-# Optional Variables
-DO_API_TOKEN=dop_v1_...
-WEBHOOK_URL=https://your-domain.vercel.app/api/webhooks/ses
+docker build -t registry.example.com/freeresend:2026-08-13 .
+docker push registry.example.com/freeresend:2026-08-13
 ```
 
-### 3. Deploy to Vercel
+Edit `k8s/deployment.yaml` and set `spec.template.spec.containers[0].image` to that image. Edit `k8s/ingress.yaml` and replace `api.example.com` with a hostname you control. Create the application secret from the template without committing the completed file:
 
-#### Option A: GitHub Integration (Recommended)
-1. Push your code to GitHub
-2. Connect repository to Vercel
-3. Configure environment variables
-4. Deploy automatically on push
-
-#### Option B: Vercel CLI
 ```bash
-# Login to Vercel
-vercel login
-
-# Deploy to production
-vercel --prod
-
-# Set environment variables
-vercel env add NEXTAUTH_URL
-vercel env add NEXTAUTH_SECRET
-vercel env add DATABASE_URL
-# ... add all other variables
+cp k8s/secret.template.yaml k8s/secret.yaml
 ```
 
-#### Option C: One-Click Deploy
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=<your-repo-url>)
+Set real values in `k8s/secret.yaml`, including `DATABASE_URL`, `NEXTAUTH_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY`. Add optional variables from the table in [SETUP.md](SETUP.md) when needed. `k8s/secret.yaml` is ignored by Git.
 
-### 4. Domain Configuration
+Apply the app:
 
-**Custom Domain:**
-1. Go to Vercel Dashboard → Settings → Domains
-2. Add your custom domain
-3. Configure DNS records as shown
-4. Update `NEXTAUTH_URL` to your custom domain
-
-**SSL Certificate:**
-- Automatically provisioned by Vercel
-- Usually takes 5-10 minutes to activate
-
-### 5. Post-Deployment Setup
-
-**Database Initialization:**
-
-Automatic on first boot — the server applies `migrations/` before accepting traffic.
-
-**Verify Deployment:**
-1. Visit your deployed URL
-2. Check `/api/health` endpoint
-3. Test login with admin credentials
-4. Add a test domain
-5. Send a test email
-
-**AWS SES Configuration:**
-1. Verify your domain in AWS SES Console
-2. Move out of sandbox mode (if needed)
-3. Configure DKIM and SPF records
-4. Set up SNS webhooks (optional)
-
-### 6. Performance Optimization
-
-**Vercel Configuration:**
-- Edge functions enabled automatically
-- Image optimization built-in
-- Static file caching optimized
-
-**Database:**
-- Use connection pooling
-- Enable read replicas for high traffic
-- Monitor query performance
-
-**Monitoring:**
-- Vercel Analytics enabled by default
-- Set up error tracking (Sentry recommended)
-- Monitor AWS SES metrics
-
-### 7. Scaling Considerations
-
-**Traffic Growth:**
-- Vercel scales automatically
-- Database may need upgrading
-- AWS SES limits may need increasing
-
-**Multi-Region:**
-- Configure multiple AWS regions
-- Use Vercel Edge Network
-- Consider database read replicas
-
-### 8. Security Checklist
-
-- [ ] Strong `NEXTAUTH_SECRET` (64+ characters)
-- [ ] Secure database passwords
-- [ ] AWS IAM with minimal permissions
-- [ ] Environment variables in Vercel (not in code)
-- [ ] HTTPS enforced (automatic with Vercel)
-- [ ] Regular security updates
-
-### 9. Troubleshooting
-
-**Common Issues:**
-
-**Build Errors:**
 ```bash
-# Check build logs in Vercel Dashboard
-# Ensure all environment variables are set
-vercel logs
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/secret.yaml
+kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/service.yaml
+kubectl apply -f k8s/ingress.yaml
+kubectl apply -f k8s/hpa.yaml
+kubectl rollout status deployment/waka -n waka
+kubectl get ingress -n waka
 ```
 
-**Database Connection:**
+The Ingress must expose `POST /api/webhooks/ses` to the public internet over HTTPS. Point the SNS HTTP(S) subscription at that exact URL and make sure the Ingress does not rewrite or change the JSON request body.
+
+### In-cluster PostgreSQL
+
+`k8s/postgres/` contains a single-replica PostgreSQL 16 StatefulSet with one PVC. It is suitable for a small test cluster, not a high-availability production database. The included `02-secrets.yaml` is a template; replace every placeholder before applying it. Use a secret manager when possible.
+
+If you use these manifests, first update `k8s/postgres/02-secrets.yaml`, then apply:
+
 ```bash
-# Test database connection
-node -e "const { Client } = require('pg'); const client = new Client(process.env.DATABASE_URL); client.connect().then(() => console.log('Connected!')).catch(console.error);"
+kubectl apply -f k8s/postgres/01-namespace.yaml
+kubectl apply -f k8s/postgres/02-secrets.yaml
+kubectl apply -f k8s/postgres/03-pvc.yaml
+kubectl apply -f k8s/postgres/04-statefulset.yaml
+kubectl apply -f k8s/postgres/05-service.yaml
+kubectl wait --for=condition=ready pod/postgres-0 -n waka --timeout=300s
 ```
 
+Set the app `DATABASE_URL` to the service host from `k8s/postgres/05-service.yaml`. The FreeResend application migration runs on app startup. The old PostgreSQL ConfigMap contains a separate schema and is not the migration source used by the app; keep the app migration as the source of truth for new deployments.
 
+## Updates and operations
 
-### 10. Maintenance
+Use a new immutable image tag for each release, update `k8s/deployment.yaml`, then apply it and wait for the rollout:
 
-**Regular Tasks:**
-- Monitor Vercel usage and billing
-- Update dependencies monthly
-- Review AWS SES usage and limits
-- Backup database regularly
-- Monitor error rates and performance
-
-**Updating:**
 ```bash
-# For GitHub integration, just push to main branch
-git push origin main
-
-# For CLI deployment
-vercel --prod
+kubectl apply -f k8s/deployment.yaml
+kubectl rollout status deployment/waka -n waka
+kubectl logs -f deployment/waka -n waka
 ```
 
-## Support
-
-- **Documentation**: Check README.md and SETUP.md
-- **Issues**: [GitHub Issues](https://github.com/eibrahim/waka/issues)
-
----
-
-**Total estimated cost for production deployment: $5-15/month**
-- Vercel: Free (hobby) or $20/month (Pro)
-- Database: $5-10/month (managed service)
-- AWS SES: $1-5/month (based on volume)
-- Domain: $10-15/year
+Back up PostgreSQL before upgrades. Do not delete the PostgreSQL PVC during cleanup unless the data is no longer needed.
