@@ -1,6 +1,6 @@
 # Setup
 
-This guide runs FreeResend locally with Docker Compose. It assumes macOS or Linux, Docker, and an AWS account. The database migration runs automatically when the API starts.
+This guide runs Waka locally with Docker Compose. It assumes macOS or Linux, Docker, and an AWS account. The database migration runs automatically when the API starts.
 
 ## Local setup
 
@@ -9,8 +9,8 @@ Run these steps in order from a fresh clone:
 1. Clone the repository and copy the environment template:
 
    ```bash
-   git clone https://github.com/DesgnSpace/waka.git freeresend
-   cd freeresend
+   git clone https://github.com/DesgnSpace/waka.git waka
+   cd waka
    cp .env.example .env
    ```
 
@@ -22,7 +22,7 @@ Run these steps in order from a fresh clone:
 - Leave `DATABASE_URL` as-is for the Compose database unless you use another PostgreSQL service.
 - Leave `DATABASE_SSL=false` for the private Compose network.
 
-3. Start PostgreSQL and FreeResend:
+3. Start PostgreSQL and Waka:
 
    ```bash
    docker compose up --build -d
@@ -57,7 +57,7 @@ The application reads these variables. `.env.example` contains the same list and
 
 | Variable | Required | Purpose | Safe example |
 | --- | --- | --- | --- |
-| `DATABASE_URL` | Yes | PostgreSQL connection string for queries and startup migrations. | `postgresql://freeresend:change-me@postgres:5432/freeresend` |
+| `DATABASE_URL` | Yes | PostgreSQL connection string for queries and startup migrations. | `postgresql://waka:change-me@postgres:5432/waka` |
 | `POSTGRES_PASSWORD` | Compose only | Password for the PostgreSQL container in `docker-compose.yml`. The Bun application does not read it. Keep it equal to the password in `DATABASE_URL`. | `change-me` |
 | `DATABASE_SSL` | No | PostgreSQL TLS mode. `false`, `disable`, or an empty value disables TLS; `true` or `require` verifies the certificate; `no-verify` or `insecure` uses TLS without certificate verification. | `false` |
 | `NEXTAUTH_SECRET` | Yes | Secret used to sign dashboard and API JWTs. | `replace-with-a-long-random-secret` |
@@ -71,14 +71,14 @@ The application reads these variables. `.env.example` contains the same list and
 | `CORS_ORIGIN` | No | Comma-separated browser origins allowed by CORS. Empty means same-origin only unless `DOMAIN` is set. | `https://app.example.com` |
 | `DOMAIN` | No | Canonical host or origin used as the CORS origin when `CORS_ORIGIN` is empty. | `api.example.com` |
 | `SES_CONFIGURATION_SET` | No | Account-wide SES configuration set attached to sends. Defaults to `waka-events`. | `waka-events` |
-| `SES_SNS_TOPIC_ARN` | No | If set, only signed SNS messages from this topic are accepted by the SES webhook. | `arn:aws:sns:us-east-1:123456789012:freeresend-events` |
+| `SES_SNS_TOPIC_ARN` | No | If set, only signed SNS messages from this topic are accepted by the SES webhook. | `arn:aws:sns:us-east-1:123456789012:waka-events` |
 | `SENTRY_DSN` | No | Enables Sentry error reporting when non-empty. | `https://examplePublicKey@o0.ingest.sentry.io/0` |
 
 Do not put real credentials in `.env.example`, source control, a Dockerfile, or a container image. Use `.env` locally and a secret store in production.
 
 ## AWS SES setup
 
-FreeResend calls SES for domain verification, DKIM, configuration sets, sending, and custom MAIL FROM. Create a dedicated IAM user or role with this policy, then place its access key values in the environment:
+Waka calls SES for domain verification, DKIM, configuration sets, sending, and custom MAIL FROM. Create a dedicated IAM user or role with this policy, then place its access key values in the environment:
 
 ```json
 {
@@ -116,7 +116,7 @@ New SES accounts start in sandbox mode in each AWS region. In sandbox mode, SES 
 
 ### Domain and DNS
 
-Add a domain in the dashboard. Copy the records shown by FreeResend to your DNS provider. The records include SES verification, DKIM, SPF, and DMARC. If you configure a custom MAIL FROM domain in the dashboard, also add the MX and SPF records shown for that domain. DNS changes can take time to appear. Verify the domain after the records are visible.
+Add a domain in the dashboard. Copy the records shown by Waka to your DNS provider. The records include SES verification, DKIM, SPF, and DMARC. If you configure a custom MAIL FROM domain in the dashboard, also add the MX and SPF records shown for that domain. DNS changes can take time to appear. Verify the domain after the records are visible.
 
 ## First email
 
@@ -129,7 +129,7 @@ curl -X POST http://localhost:3000/api/emails \
   -d '{
     "from": "hello@example.com",
     "to": ["recipient@example.com"],
-    "subject": "FreeResend test",
+    "subject": "Waka test",
     "text": "This is a test message."
   }'
 ```

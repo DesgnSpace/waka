@@ -437,7 +437,7 @@ const CSP = [
 function topBar(user: AuthUser | null | undefined): string {
   if (!user) return "";
   return `<div class="top">
-    <a class="brand" href="/dashboard">FreeResend</a>
+    <a class="brand" href="/dashboard">Waka</a>
     <div class="top-right">
       <span>${esc(user.email)}</span>
       <form class="inline-form" method="post" action="/logout" hx-confirm="Sign out?">
@@ -457,7 +457,7 @@ function layout(title: string, body: string, user?: AuthUser | null, csrf = ""):
     : pageBody;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)} · FreeResend</title>
+<title>${esc(title)} · Waka</title>
 <script src="${HTMX_SRC}" integrity="${HTMX_SRI}" crossorigin="anonymous"></script>
 <style>${STYLE}</style>
 <script>${APP_SCRIPT}</script>
@@ -509,9 +509,9 @@ function emptyState(title: string, desc: string): string {
   return `<div class="empty"><div class="empty-t">${esc(title)}</div><div>${esc(desc)}</div></div>`;
 }
 
-function problemPage(title: string, message: string, user: AuthUser, status = 503): Response {
+function problemPage(req: Req, title: string, message: string, user: AuthUser, status = 503): Response {
   const body = `${crumbs([{ label: "domains", href: "/dashboard" }])}<h1>${esc(title)}</h1>${alert("err", message)}`;
-  return html(layout(title, body, user), { status });
+  return renderPage(req, title, body, user, { status });
 }
 
 function crumbs(parts: Array<{ label: string; href?: string }>): string {
@@ -531,7 +531,7 @@ export function loginPage(req: Req): Response {
 
 function loginView(error = ""): string {
   return `<div class="login">
-    <h1>FreeResend</h1>
+    <h1>Waka</h1>
     <p class="lede">Send email from your own domain.</p>
     ${error ? alert("err", error) : ""}
     <form method="post" action="/login">
@@ -664,7 +664,7 @@ export async function dashboard(req: Req): Promise<Response> {
     domains = await getUserDomains(user.id);
   } catch (err) {
     console.error("load domains failed:", err);
-    return problemPage("Domains", "We could not load your domains. Refresh the page and try again.", user);
+    return problemPage(req, "Domains", "We could not load your domains. Refresh the page and try again.", user);
   }
   return renderPage(req, "domains", domainsView(domains, flashFrom(req)), user);
 }
@@ -958,7 +958,7 @@ export async function uiDomainLogs(req: Req): Promise<Response> {
     logs = await getDomainEmailLogs(user.id, domain.id);
   } catch (err) {
     console.error("load email activity failed:", err);
-    return problemPage("Email activity", "We could not load email activity. Refresh the page and try again.", user);
+    return problemPage(req, "Email activity", "We could not load email activity. Refresh the page and try again.", user);
   }
   const body = `${crumbs([{ label: "domains", href: "/dashboard" }, { label: domain.domain, href: `/ui/domains/${esc(domain.id)}` }, { label: "email activity" }])}
     <h1>Email activity</h1>
@@ -1076,7 +1076,7 @@ export async function uiDomainKeys(req: Req): Promise<Response> {
     keys = await getDomainApiKeys(domain.id, user.id);
   } catch (err) {
     console.error("load API keys failed:", err);
-    return problemPage("API keys", "We could not load your API keys. Refresh the page and try again.", user);
+    return problemPage(req, "API keys", "We could not load your API keys. Refresh the page and try again.", user);
   }
   return renderPage(req, `${domain.domain} keys`, keysBody(domain as DomainRow, keys, flashFrom(req)), user);
 }
