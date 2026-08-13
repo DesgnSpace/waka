@@ -15,6 +15,7 @@ import {
   updateMailFromDomain,
 } from "@/lib/domains";
 import { getDomainApiKeys, generateApiKey, deleteApiKey } from "@/lib/api-keys";
+import { sendEmail } from "@/lib/ses";
 import { query } from "@/lib/database";
 
 // --- helpers -----------------------------------------------------------------
@@ -74,6 +75,12 @@ const FLASH: Record<string, { kind: "ok" | "err" | "mut"; text: string }> = {
   failed: { kind: "err", text: "DNS verification needs attention. Check each record and try again." },
   revoked: { kind: "ok", text: "API key revoked. Apps using it can no longer send email." },
   "revoke-failed": { kind: "err", text: "We could not revoke that API key. Nothing was changed; try again." },
+  "test-recipient": { kind: "err", text: "Enter a valid recipient email address and try again." },
+  "test-failed": { kind: "err", text: "The test email was not sent. Check the recipient address and try again." },
+  "test-config": { kind: "err", text: "The email service cannot send this message yet. Ask the administrator to check the sending settings." },
+  "test-pending": { kind: "mut", text: "Verify this domain before sending a test email." },
+  "test-log-failed": { kind: "mut", text: "The test email was accepted, but its activity could not be recorded. Ask the administrator to check the database." },
+  "test-sent": { kind: "ok", text: "Test email accepted. Delivery updates appear in email activity." },
   "verify-failed": { kind: "err", text: "We could not check DNS right now. Try again in a moment." },
   "domain-required": { kind: "err", text: "Enter a domain such as example.com." },
   "domain-invalid": { kind: "err", text: "That does not look like a domain. Enter a name such as example.com and try again." },
@@ -449,6 +456,13 @@ function domainAddFlash(error: unknown): string {
   if (/valid domain/i.test(message)) return "domain-invalid";
   if (/already registered|another account/i.test(message)) return "domain-owned";
   return "domain-failed";
+}
+
+function testEmailFlash(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  return /sandbox|not verified|not authorized|accessdenied|credentials|permission/i.test(message)
+    ? "test-config"
+    : "test-failed";
 }
 
 function emptyState(title: string, desc: string): string {
@@ -908,11 +922,64 @@ function domainKeysView(
            <button type="submit" class="btn" data-loading-label="creating...">create API key</button>
          </form>`
        : alert("mut", "Verify this domain first. The API key form will appear here when it is ready.");
+  const testEmail = domain.status === "verified" && keys.length > 0 ? `<div class="block test-email">
+      <div class="block-title">Send a test email</div>
+      <p class="note">Use your verified domain to send a simple message to your inbox. You can track it in email activity.</p>
+      <form class="toolbar" method="post" action="/ui/domains/${esc(domain.id)}/keys">
+        <label><span>Recipient email</span><input name="to" type="email" autocomplete="email" placeholder="you@example.com" required></label>
+        <button type="submit" class="btn" data-loading-label="sending...">send test email</button>
+      </form>
+    </div>` : "";
   return `${banner}${form}
+  ${testEmail}
   <div class="table-wrap"><table>
     <thead><tr><th>name</th><th>key starts with</th><th>access</th><th>created</th><th class="right">actions</th></tr></thead>
     <tbody>${rows || `<tr><td colspan="5">${emptyState("No API keys yet", domain.status === "verified" ? "Create your first key to send email from this domain." : "Verify this domain before creating an API key.")}</td></tr>`}</tbody>
   </table></div>`;
+}
+
+async function sendTestEmail(domain: DomainRow, recipient: string): Promise<Response> {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+    return seeOther(`/ui/domains/${domain.id}?m=test-recipient`);
+  }
+  if (domain.status !== "verified") return seeOther(`/ui/domains/${domain.id}?m=test-pending`);
+
+  const from = `test@${domain.domain}`;
+  const subject = `Test email from ${domain.domain}`;
+  const text = `This test confirms that ${domain.domain} can send email.`;
+  let messageId: string;
+  try {
+    messageId = await sendEmail({ from, to: [recipient], subject, text });
+  } catch (err) {
+    console.error("test email failed:", err);
+    return seeOther(`/ui/domains/${domain.id}?m=${testEmailFlash(err)}`);
+  }
+
+  try {
+    await query(
+      `INSERT INTO email_logs (
+        domain_id, from_email, to_emails, cc_emails, bcc_emails,
+        subject, text_content, attachments, status, ses_message_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        domain.id,
+        from,
+        JSON.stringify([recipient]),
+        JSON.stringify([]),
+        JSON.stringify([]),
+        subject,
+        text,
+        JSON.stringify([]),
+        "sent",
+        messageId,
+      ]
+    );
+  } catch (err) {
+    console.error("test email log failed:", err);
+    return seeOther(`/ui/domains/${domain.id}/logs?m=test-log-failed`);
+  }
+
+  return seeOther(`/ui/domains/${domain.id}/logs?m=test-sent`);
 }
 
 function keysBody(domain: DomainRow, keys: DomainKeys, banner = ""): string {
@@ -948,7 +1015,11 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
   if (!domain || domain.user_id !== user.id) {
     return html(layout("Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user), { status: 404 });
   }
-  const keyName = String((await req.formData()).get("keyName") ?? "").trim();
+  const form = await req.formData();
+  if (form.has("to")) {
+    return sendTestEmail(domain, String(form.get("to") ?? "").trim());
+  }
+  const keyName = String(form.get("keyName") ?? "").trim();
   let banner = "";
   try {
     if (domain.status !== "verified") banner = alert("err", "Domain must be verified first.");
