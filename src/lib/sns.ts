@@ -26,7 +26,7 @@ export interface SnsMessage {
 }
 
 // Keys that are signed, in the exact order AWS uses, per message type.
-const SIGNED_KEYS: Record<string, string[]> = {
+const SIGNED_KEYS: Record<string, Array<keyof SnsMessage>> = {
   Notification: ["Message", "MessageId", "Subject", "Timestamp", "TopicArn", "Type"],
   SubscriptionConfirmation: [
     "Message",
@@ -49,30 +49,24 @@ const SIGNED_KEYS: Record<string, string[]> = {
 };
 
 const certCache = new Map<string, string>();
+const snsHostPattern = /^sns\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$/i;
+
+function isValidSnsUrl(rawUrl: string): URL | null {
+  try {
+    const url = new URL(rawUrl);
+    return url.protocol === "https:" && snsHostPattern.test(url.hostname)
+      ? url
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 // Only fetch signing certs from genuine AWS SNS hosts (prevents SSRF / a forged
 // SigningCertURL pointing at an attacker-controlled cert).
 function isValidCertUrl(rawUrl: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== "https:") return false;
-  if (!/^sns\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$/i.test(url.hostname)) return false;
-  if (!url.pathname.endsWith(".pem")) return false;
-  return true;
-}
-
-function isValidSnsUrl(rawUrl: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return false;
-  }
-  return url.protocol === "https:" && /^sns\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$/i.test(url.hostname);
+  const url = isValidSnsUrl(rawUrl);
+  return url !== null && url.pathname.endsWith(".pem");
 }
 
 async function fetchCert(certUrl: string): Promise<string> {
@@ -94,7 +88,7 @@ function buildStringToSign(message: SnsMessage): string | null {
 
   let str = "";
   for (const key of keys) {
-    const value = (message as unknown as Record<string, unknown>)[key];
+    const value = message[key];
     // Subject is optional: skip when absent (AWS omits it from the signed string).
     if (value === undefined || value === null) continue;
     str += `${key}\n${String(value)}\n`;

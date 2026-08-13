@@ -4,13 +4,13 @@ import {
   SendRawEmailCommand,
   VerifyDomainIdentityCommand,
   GetIdentityVerificationAttributesCommand,
-  DeleteIdentityCommand,
   CreateConfigurationSetCommand,
   VerifyDomainDkimCommand,
   GetIdentityDkimAttributesCommand,
   SetIdentityMailFromDomainCommand,
 } from "@aws-sdk/client-ses";
 import crypto from "crypto";
+import { errorHttpStatus, errorMessage, errorName } from "./errors";
 
 const sesClient = new SESClient({
   region: process.env.AWS_REGION || "us-east-1",
@@ -38,6 +38,14 @@ export interface SendEmailOptions {
 export interface SESVerificationResult {
   verificationToken: string;
   status: "Pending" | "Success" | "Failed" | "TemporaryFailure" | "NotStarted";
+}
+
+export interface DNSRecord {
+  type: string;
+  name: string;
+  value: string;
+  ttl?: number;
+  description?: string;
 }
 
 // --- RFC 5322 / 2045 header + MIME helpers -----------------------------------
@@ -112,7 +120,10 @@ export async function sendEmail(options: SendEmailOptions): Promise<string> {
   });
 
   const response = await sesClient.send(command);
-  return response.MessageId!;
+  if (!response.MessageId) {
+    throw new Error("SES did not return a MessageId");
+  }
+  return response.MessageId;
 }
 
 // Builds a raw multipart MIME message (required by SES for attachments) and
@@ -207,8 +218,12 @@ export async function verifyDomain(
 
   const response = await sesClient.send(command);
 
+  if (!response.VerificationToken) {
+    throw new Error("SES did not return a domain verification token");
+  }
+
   return {
-    verificationToken: response.VerificationToken!,
+    verificationToken: response.VerificationToken,
     status: "Pending",
   };
 }
@@ -246,14 +261,6 @@ export async function getDomainDkimTokens(domain: string): Promise<string[]> {
   return attributes?.DkimTokens || [];
 }
 
-export async function deleteDomainIdentity(domain: string): Promise<void> {
-  const command = new DeleteIdentityCommand({
-    Identity: domain,
-  });
-
-  await sesClient.send(command);
-}
-
 export async function createConfigurationSet(domain: string): Promise<string> {
   const configSetName = `waka-${domain.replace(/\./g, "-")}`;
 
@@ -268,14 +275,15 @@ export async function createConfigurationSet(domain: string): Promise<string> {
 
     return configSetName;
   } catch (error: unknown) {
-    const awsError = error as { name?: string; message?: string; $metadata?: { httpStatusCode?: number } };
-    // Handle various ways AWS might indicate the configuration set already exists
+    const name = errorName(error);
+    const message = errorMessage(error);
+    const status = errorHttpStatus(error);
     if (
-      awsError.name === "AlreadyExistsException" ||
-      awsError.name === "ConfigurationSetAlreadyExistsException" ||
-      awsError.message?.includes("already exists") ||
-      awsError.message?.includes("Configuration set") ||
-      awsError.$metadata?.httpStatusCode === 409
+      name === "AlreadyExistsException" ||
+      name === "ConfigurationSetAlreadyExistsException" ||
+      message.includes("already exists") ||
+      message.includes("Configuration set") ||
+      status === 409
     ) {
       console.log(
         `Configuration set ${configSetName} already exists, continuing...`

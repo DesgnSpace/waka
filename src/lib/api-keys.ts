@@ -214,10 +214,3 @@ export async function updateApiKeyPermissions(
     throw new Error(`Couldn't update API key permissions: ${errorMessage(error)}`);
   }
 }
-
-export function maskApiKey(apiKey: string): string {
-  const parts = apiKey.split("_");
-  if (parts.length !== 3) return "wka_...";
-
-  return `${parts[0]}_${parts[1]}_${"*".repeat(parts[2].length)}`;
-}

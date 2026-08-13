@@ -4,7 +4,7 @@ import { z } from "zod";
 import { query } from "./database";
 import type { User } from "./database";
 
-const JWT_ALGORITHM = "HS256" as const;
+const JWT_ALGORITHM = "HS256";
 const JWT_EXPIRES_IN = "1h";
 const authClaimsSchema = z.object({
   id: z.string().uuid(),

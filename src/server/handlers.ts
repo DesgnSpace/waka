@@ -30,36 +30,43 @@ import {
   normalizeDkimSelector,
   normalizeDomain,
 } from "@/lib/email-dns-readiness";
-import { query } from "@/lib/database";
+import { query, type DbRow } from "@/lib/database";
+import { errorCode, errorHttpStatus, errorMessage, errorName } from "@/lib/errors";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 import { reserveDailySend } from "@/lib/quotas";
+import { parseJsonArray, parseJsonObject } from "@/lib/serialization";
 
-// JSONB columns can come back as string or already-parsed; normalize to array.
-function safeParseEmailArray(value: unknown): unknown[] {
-  if (!value) return [];
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return [];
-    }
-  }
-  return Array.isArray(value) ? value : [];
-}
-
-function safeParseJSON(value: unknown): Record<string, unknown> {
-  if (!value) return {};
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return {};
-    }
-  }
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : {};
-}
+type DomainIdRow = DbRow<{ id: string }>;
+type EmailLogRow = DbRow<{
+  id: string;
+  api_key_id: string | null;
+  domain_id: string;
+  message_id: string | null;
+  from_email: string;
+  to_emails: unknown;
+  cc_emails: unknown;
+  bcc_emails: unknown;
+  subject: string | null;
+  html_content: string | null;
+  text_content: string | null;
+  attachments: unknown;
+  status: string;
+  ses_message_id: string | null;
+  error_message: string | null;
+  webhook_data: unknown;
+  created_at: string;
+  updated_at: string;
+  domain_name: string | null;
+  api_key_name: string | null;
+}>;
+type EmailDetailRow = EmailLogRow & { domain_user_id: string };
+type EmailCountRow = DbRow<{ count: string }>;
+type WebhookEventRow = DbRow<{
+  id: string;
+  event_type: string;
+  event_data: unknown;
+  created_at: string;
+}>;
 
 // ----------------------------------------------------------------------------
 // health + setup
@@ -126,11 +133,7 @@ export async function signup(req: Req): Promise<Response> {
   try {
     await createUser(email, password, name);
   } catch (error) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error
-        ? error.code
-        : undefined;
-    if (code === "23505") {
+    if (errorCode(error) === "23505") {
       return signupResponse();
     }
     throw error;
@@ -308,8 +311,9 @@ const sendEmailSchema = z
       (v) => {
         if (v == null) return undefined;
         if (Array.isArray(v)) return v;
-        if (typeof v === "object") {
-          return Object.entries(v as Record<string, unknown>).map(([name, value]) => ({ name, value: String(value) }));
+        if (typeof v === "object" && v !== null) {
+          const record = z.record(z.unknown()).parse(v);
+          return Object.entries(record).map(([name, value]) => ({ name, value: String(value) }));
         }
         return v;
       },
@@ -375,13 +379,16 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
   } catch (err) {
     // Surface the provider's real reason (e.g. "Email address is not verified",
     // "AccessDenied") instead of a blank 500, so the caller can act on it.
-    const e = err as { name?: string; message?: string; $metadata?: { httpStatusCode?: number } };
-    console.error("SES send failed:", e.name, e.message);
-    const sc = e.$metadata?.httpStatusCode ?? 0;
-    // Pass through the provider's own 4xx (e.g. AccessDenied 403); otherwise 502.
-    const status = sc >= 400 && sc < 500 ? sc : 502;
-    const reason = e.message || "Email provider rejected the message.";
-    throw new HttpError(status, { error: reason, message: reason, code: e.name });
+    const name = errorName(err);
+    const reason = errorMessage(err);
+    const statusCode = errorHttpStatus(err) ?? 0;
+    console.error("SES send failed:", name, reason);
+    const status = statusCode >= 400 && statusCode < 500 ? statusCode : 502;
+    throw new HttpError(status, {
+      error: reason || "Email provider rejected the message.",
+      message: reason || "Email provider rejected the message.",
+      code: name,
+    });
   }
 
   // Persist attachment metadata only — never the raw base64 payload.
@@ -391,9 +398,8 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
     size: decodedBase64Bytes(a.content),
   }));
 
-  let emailLogId: string | undefined;
   try {
-    const result = await query(
+    const result = await query<{ id: string }>(
       `INSERT INTO email_logs (
         api_key_id, domain_id, from_email, to_emails, cc_emails, bcc_emails,
         subject, html_content, text_content, attachments, status, ses_message_id
@@ -414,17 +420,20 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
         messageId,
       ]
     );
-    emailLogId = result.rows[0]?.id;
-  } catch (logError) {
-    console.error("Failed to log email:", logError);
+    const emailLogId = result.rows[0]?.id;
+    return json({
+      id: emailLogId || messageId,
+      from,
+      to,
+      created_at: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Failed to record sent email:", error);
+    throw new HttpError(500, {
+      error: "Email sent but could not be recorded.",
+      message: "Email sent but could not be recorded.",
+    });
   }
-
-  return json({
-    id: emailLogId || messageId,
-    from,
-    to,
-    created_at: new Date().toISOString(),
-  });
 }
 
 export async function emailLogs(req: Req): Promise<Response> {
@@ -452,7 +461,7 @@ export async function emailLogs(req: Req): Promise<Response> {
   } else {
     const user = requireUser(req);
     scopedUserId = user.id;
-    const result = await query("SELECT id FROM domains WHERE user_id = $1", [user.id]);
+    const result = await query<DomainIdRow>("SELECT id FROM domains WHERE user_id = $1", [user.id]);
     domainIds = result.rows.map((d) => d.id);
   }
 
@@ -470,7 +479,7 @@ export async function emailLogs(req: Req): Promise<Response> {
     scopedUserId,
   ];
 
-  const countResult = await query(
+  const countResult = await query<EmailCountRow>(
     `SELECT COUNT(*) as count FROM email_logs el
      WHERE el.domain_id = ANY($1)
        AND ($2::uuid IS NULL OR el.domain_id = $2)
@@ -480,7 +489,7 @@ export async function emailLogs(req: Req): Promise<Response> {
   );
   const totalCount = parseInt(countResult.rows[0].count);
 
-  const emailLogsResult = await query(
+  const emailLogsResult = await query<EmailLogRow>(
      `SELECT el.*, d.domain as domain_name, ak.key_name as api_key_name
       FROM email_logs el
       JOIN domains d ON el.domain_id = d.id AND d.user_id = $4
@@ -496,10 +505,10 @@ export async function emailLogs(req: Req): Promise<Response> {
 
   const emails = emailLogsResult.rows.map((row) => ({
     ...row,
-    to_emails: safeParseEmailArray(row.to_emails),
-    cc_emails: safeParseEmailArray(row.cc_emails),
-    bcc_emails: safeParseEmailArray(row.bcc_emails),
-    attachments: safeParseEmailArray(row.attachments),
+    to_emails: parseJsonArray(row.to_emails, "to_emails"),
+    cc_emails: parseJsonArray(row.cc_emails, "cc_emails"),
+    bcc_emails: parseJsonArray(row.bcc_emails, "bcc_emails"),
+    attachments: parseJsonArray(row.attachments, "attachments"),
     domains: row.domain_name ? { domain: row.domain_name } : null,
     api_keys: row.api_key_name ? { key_name: row.api_key_name } : null,
   }));
@@ -515,7 +524,7 @@ export async function emailLogs(req: Req): Promise<Response> {
 
 export async function getEmail(req: Req): Promise<Response> {
   const user = requireUser(req);
-  const emailResult = await query(
+  const emailResult = await query<EmailDetailRow>(
     `SELECT el.*, d.domain as domain_name, d.user_id as domain_user_id, ak.key_name as api_key_name
      FROM email_logs el
      JOIN domains d ON el.domain_id = d.id AND d.user_id = $2
@@ -527,7 +536,7 @@ export async function getEmail(req: Req): Promise<Response> {
   if (emailResult.rows.length === 0) return json({ error: "Email not found" }, 404);
 
   const emailData = emailResult.rows[0];
-  const webhookResult = await query(
+  const webhookResult = await query<WebhookEventRow>(
     `SELECT id, event_type, event_data, created_at
       FROM webhook_events we
       JOIN email_logs el ON el.id = we.email_log_id
@@ -539,15 +548,15 @@ export async function getEmail(req: Req): Promise<Response> {
 
   const email = {
     ...emailData,
-    to_emails: safeParseEmailArray(emailData.to_emails),
-    cc_emails: safeParseEmailArray(emailData.cc_emails),
-    bcc_emails: safeParseEmailArray(emailData.bcc_emails),
-    attachments: safeParseEmailArray(emailData.attachments),
+    to_emails: parseJsonArray(emailData.to_emails, "to_emails"),
+    cc_emails: parseJsonArray(emailData.cc_emails, "cc_emails"),
+    bcc_emails: parseJsonArray(emailData.bcc_emails, "bcc_emails"),
+    attachments: parseJsonArray(emailData.attachments, "attachments"),
     domains: { domain: emailData.domain_name, user_id: emailData.domain_user_id },
     api_keys: emailData.api_key_name ? { key_name: emailData.api_key_name } : null,
     webhook_events: webhookResult.rows.map((row) => ({
       ...row,
-      event_data: safeParseJSON(row.event_data),
+      event_data: parseJsonObject(row.event_data, "event_data"),
     })),
   };
 
@@ -563,7 +572,7 @@ async function resolveTxt(name: string, errors: string[]): Promise<string[]> {
     const records = await dns.resolveTxt(name);
     return records.map((parts) => parts.join(""));
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
+    const code = errorCode(error);
     if (code === "ENODATA" || code === "ENOTFOUND" || code === "ENOENT") return [];
     errors.push(`${name}: TXT lookup failed`);
     return [];
@@ -575,7 +584,7 @@ async function resolveMx(name: string, errors: string[]): Promise<string[]> {
     const records = await dns.resolveMx(name);
     return records.sort((a, b) => a.priority - b.priority).map((r) => `${r.priority} ${r.exchange}`);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
+    const code = errorCode(error);
     if (code === "ENODATA" || code === "ENOTFOUND" || code === "ENOENT") return [];
     errors.push(`${name}: MX lookup failed`);
     return [];
@@ -586,7 +595,7 @@ async function resolveCname(name: string, errors: string[]): Promise<string[]> {
   try {
     return await dns.resolveCname(name);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
+    const code = errorCode(error);
     if (code === "ENODATA" || code === "ENOTFOUND" || code === "ENOENT") return [];
     errors.push(`${name}: CNAME lookup failed`);
     return [];
@@ -626,6 +635,6 @@ export async function emailDnsChecker(req: Req): Promise<Response> {
       })
     );
   } catch (error) {
-    return json({ error: (error as Error).message }, 400);
+    return json({ error: errorMessage(error) }, 400);
   }
 }

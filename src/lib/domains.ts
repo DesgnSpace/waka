@@ -8,22 +8,18 @@ import {
   getDomainDkimTokens,
   setMailFromDomain,
   mailFromRecords,
+  type DNSRecord,
 } from "./ses";
 import type { Domain } from "./database";
-import { parseJsonArray } from "./serialization";
+import { errorMessage } from "./errors";
+import { isRecord, parseJsonArrayOf } from "./serialization";
 
-export interface DNSRecord {
-  type: string;
-  name: string;
-  value: string;
-  ttl?: number;
-  description?: string;
-}
+export type { DNSRecord } from "./ses";
 
 export interface DomainSetupResult {
   domain: PublicDomain;
   dnsRecords: DNSRecord[];
-  sesConfigurationSet?: string;
+  sesConfigurationSet?: string | null;
   setupInstructions: string;
 }
 
@@ -52,8 +48,8 @@ export type PublicDomain = Omit<
 >;
 
 function isDnsRecord(value: unknown): value is DNSRecord {
-  if (typeof value !== "object" || value === null) return false;
-  const record = value as Record<string, unknown>;
+  if (!isRecord(value)) return false;
+  const record = value;
   return (
     typeof record.type === "string" &&
     typeof record.name === "string" &&
@@ -64,7 +60,7 @@ function isDnsRecord(value: unknown): value is DNSRecord {
 }
 
 function parseDnsRecords(value: unknown): DNSRecord[] {
-  return value == null ? [] : parseJsonArray(value, "dns_records", isDnsRecord);
+  return value == null ? [] : parseJsonArrayOf(value, "dns_records", isDnsRecord);
 }
 
 function domainFromRow(row: DomainRow): DomainWithDnsRecords {
@@ -108,9 +104,7 @@ export async function addDomain(
         `DKIM enabled for ${domainName} with ${dkimTokens.length} tokens`
       );
     } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      console.warn(`DKIM setup failed for ${domainName}:`, errorMessage);
+      console.warn(`DKIM setup failed for ${domainName}:`, errorMessage(error));
       console.warn(
         "Continuing without DKIM. You can set it up manually in the AWS SES console."
       );
@@ -159,8 +153,7 @@ export async function addDomain(
       setupInstructions,
     };
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Couldn't add domain: ${errorMessage}`);
+    throw new Error(`Couldn't add domain: ${errorMessage(error)}`);
   }
 }
 
@@ -188,11 +181,10 @@ async function verifyAndCompleteExistingDomain(
       sesStatus = await getDomainVerificationStatus(domainName);
       console.log(`SES status for ${domainName}: ${sesStatus}`);
     } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       if (
-        errorMessage.includes("not exist") ||
-        errorMessage.includes("not found")
+        message.includes("not exist") ||
+        message.includes("not found")
       ) {
         // Domain doesn't exist in SES, need to verify it
         console.log(`Domain ${domainName} not found in SES, re-verifying...`);
@@ -204,12 +196,8 @@ async function verifyAndCompleteExistingDomain(
           updateFields.verification_token = sesVerificationToken;
           console.log(`Re-verified domain ${domainName} in SES`);
         } catch (verifyError: unknown) {
-          const verifyErrorMessage =
-            verifyError instanceof Error
-              ? verifyError.message
-              : String(verifyError);
           console.warn(
-            `Failed to re-verify domain in SES: ${verifyErrorMessage}`
+            `Failed to re-verify domain in SES: ${errorMessage(verifyError)}`
           );
         }
       }
@@ -228,10 +216,8 @@ async function verifyAndCompleteExistingDomain(
           `Enabled DKIM for ${domainName} with ${dkimTokens.length} tokens`
         );
       } catch (dkimError: unknown) {
-        const dkimErrorMessage =
-          dkimError instanceof Error ? dkimError.message : String(dkimError);
         console.warn(
-          `Failed to enable DKIM for ${domainName}: ${dkimErrorMessage}`
+          `Failed to enable DKIM for ${domainName}: ${errorMessage(dkimError)}`
         );
       }
     }
@@ -247,9 +233,7 @@ async function verifyAndCompleteExistingDomain(
           `Created configuration set for ${domainName}: ${configurationSet}`
         );
       } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        console.warn(`Failed to create configuration set: ${errorMessage}`);
+        console.warn(`Failed to create configuration set: ${errorMessage(error)}`);
       }
     }
 
@@ -287,7 +271,7 @@ async function verifyAndCompleteExistingDomain(
         return {
           domain: publicDomain(updatedDomain),
           dnsRecords,
-          sesConfigurationSet: configurationSet ?? undefined,
+          sesConfigurationSet: configurationSet,
           setupInstructions,
         };
       }
@@ -300,12 +284,11 @@ async function verifyAndCompleteExistingDomain(
         dns_records: parseDnsRecords(existingDomain.dns_records),
       }),
       dnsRecords,
-      sesConfigurationSet: configurationSet ?? undefined,
+      sesConfigurationSet: configurationSet,
       setupInstructions: `Domain already exists. ${setupInstructions}`,
     };
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Couldn't verify existing domain setup: ${errorMessage}`);
+    throw new Error(`Couldn't verify existing domain setup: ${errorMessage(error)}`);
   }
 }
 
@@ -322,8 +305,7 @@ export async function getUserDomains(userId: string): Promise<PublicDomain[]> {
 
     return result.rows.map((row) => publicDomain(domainFromRow(row)));
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to fetch domains: ${errorMessage}`);
+    throw new Error(`Failed to fetch domains: ${errorMessage(error)}`);
   }
 }
 
@@ -382,8 +364,7 @@ export async function updateDomainStatus(
       throw new Error("Domain not found.");
     }
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Couldn't update domain status: ${errorMessage}`);
+    throw new Error(`Couldn't update domain status: ${errorMessage(error)}`);
   }
 }
 
@@ -427,10 +408,6 @@ export async function deleteDomain(
   }
 
   try {
-    // Delete from SES (if needed)
-    // await deleteDomainIdentity(domain.domain)
-
-    // Delete domain record
     const result = await query(
       "DELETE FROM domains WHERE id = $1 AND user_id = $2",
       [domainId, userId]
@@ -440,8 +417,7 @@ export async function deleteDomain(
       throw new Error("Domain not found or you don't have access.");
     }
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Couldn't delete domain: ${errorMessage}`);
+    throw new Error(`Couldn't delete domain: ${errorMessage(error)}`);
   }
 }
 
@@ -483,44 +459,8 @@ export async function updateMailFromDomain(
   return { mailFrom, dnsRecords };
 }
 
-export async function refreshAllDomainStatuses(): Promise<void> {
-  try {
-    const result = await query(
-      "SELECT id, domain, status, user_id FROM domains WHERE status = 'pending'"
-    );
-
-    for (const domain of result.rows) {
-      try {
-        await checkDomainVerification(domain.id, domain.user_id);
-        // Small delay to avoid rate limiting
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      } catch (error) {
-        console.error(
-          `Failed to check verification for domain ${domain.domain}:`,
-          error
-        );
-      }
-    }
-  } catch (error) {
-    console.error("Failed to fetch pending domains:", error);
-  }
-}
-
 export function isValidDomain(domain: string): boolean {
   const domainRegex =
     /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
   return domainRegex.test(domain) && domain.length <= 253;
-}
-
-export function extractDomainFromEmail(email: string): string {
-  const parts = email.split("@");
-  return parts.length === 2 ? parts[1] : "";
-}
-
-export async function validateEmailDomain(email: string): Promise<boolean> {
-  const domain = extractDomainFromEmail(email);
-  if (!domain) return false;
-
-  const domainRecord = await getDomainByName(domain);
-  return domainRecord?.status === "verified";
 }
