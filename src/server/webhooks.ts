@@ -1,6 +1,7 @@
-import { json, type Req } from "./http";
+import { json, jsonBody, type Req } from "./http";
 import { query } from "@/lib/database";
 import { validateSnsMessage, confirmSubscription, type SnsMessage } from "@/lib/sns";
+import { z } from "zod";
 
 interface SESMessage {
   // Config-set events use PascalCase `eventType` ("Delivery"); identity
@@ -16,10 +17,47 @@ interface SESMessage {
   click?: { timestamp?: string; ipAddress?: string; userAgent?: string; link?: string };
 }
 
+const sesMessageSchema = z.object({
+  eventType: z.string().optional(),
+  notificationType: z.string().optional(),
+  mail: z.object({
+    messageId: z.string().min(1),
+    timestamp: z.string(),
+    source: z.string(),
+    destination: z.array(z.string()),
+  }),
+  bounce: z.object({
+    bouncedRecipients: z.array(z.object({ emailAddress: z.string(), diagnosticCode: z.string() })),
+  }).optional(),
+  complaint: z.object({ complainedRecipients: z.array(z.object({ emailAddress: z.string() })) }).optional(),
+  open: z.object({ timestamp: z.string().optional(), ipAddress: z.string().optional(), userAgent: z.string().optional() }).optional(),
+  click: z.object({ timestamp: z.string().optional(), ipAddress: z.string().optional(), userAgent: z.string().optional(), link: z.string().optional() }).optional(),
+}).refine((message) => Boolean(message.eventType || message.notificationType), "Missing SES event type");
+
+const snsMessageSchema = z.object({
+  Type: z.enum(["Notification", "SubscriptionConfirmation", "UnsubscribeConfirmation"]),
+  MessageId: z.string().min(1),
+  Token: z.string().optional(),
+  TopicArn: z.string().optional(),
+  Subject: z.string().optional(),
+  Message: z.string(),
+  SubscribeURL: z.string().url().optional(),
+  Timestamp: z.string().min(1),
+  SignatureVersion: z.enum(["1", "2"]),
+  Signature: z.string().min(1),
+  SigningCertURL: z.string().url().optional(),
+  SigningCertUrl: z.string().url().optional(),
+  UnsubscribeURL: z.string().url().optional(),
+});
+
 async function processSESEvent(message: SESMessage): Promise<void> {
   try {
     const emailResult = await query(
-      "SELECT * FROM email_logs WHERE ses_message_id = $1 LIMIT 1",
+      `SELECT el.id, el.domain_id, el.status
+       FROM email_logs el
+       JOIN domains d ON d.id = el.domain_id
+       WHERE el.ses_message_id = $1
+       LIMIT 1`,
       [message.mail.messageId]
     );
     if (emailResult.rows.length === 0) {
@@ -94,7 +132,9 @@ async function processSESEvent(message: SESMessage): Promise<void> {
 }
 
 export async function snsWebhook(req: Req): Promise<Response> {
-  const body = (await req.json()) as SnsMessage;
+  const parsed = snsMessageSchema.safeParse(await jsonBody(req));
+  if (!parsed.success) return json({ error: "Invalid SNS message" }, 400);
+  const body: SnsMessage = parsed.data;
 
   // Reject anything without a valid AWS SNS signature.
   if (!(await validateSnsMessage(body))) {
@@ -104,7 +144,10 @@ export async function snsWebhook(req: Req): Promise<Response> {
 
   // Optionally pin to a specific topic (set SES_SNS_TOPIC_ARN to enable).
   const expectedTopic = process.env.SES_SNS_TOPIC_ARN;
-  if (expectedTopic && body.TopicArn !== expectedTopic) {
+  if (!expectedTopic) {
+    return json({ error: "Webhook topic is not configured." }, 503);
+  }
+  if (body.TopicArn !== expectedTopic) {
     console.warn(`Rejected SNS message from unexpected topic: ${body.TopicArn}`);
     return json({ error: "Unexpected topic" }, 403);
   }
@@ -123,7 +166,13 @@ export async function snsWebhook(req: Req): Promise<Response> {
   }
 
   if (body.Type === "Notification") {
-    await processSESEvent(JSON.parse(body.Message) as SESMessage);
+    let message: SESMessage;
+    try {
+      message = sesMessageSchema.parse(JSON.parse(body.Message));
+    } catch {
+      return json({ error: "Invalid SES event" }, 400);
+    }
+    await processSESEvent(message);
     return json({ message: "Event processed" });
   }
 

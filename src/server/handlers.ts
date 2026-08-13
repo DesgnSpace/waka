@@ -1,8 +1,16 @@
 import { z } from "zod";
 import { promises as dns } from "node:dns";
 
-import { json, requireUser, requireApiKey, HttpError, type Req } from "./http";
-import { authenticateUser, generateJWT, initializeDefaultUser } from "@/lib/auth";
+import {
+  json,
+  requireUser,
+  requireApiKey,
+  HttpError,
+  jsonBody,
+  pathUuid,
+  type Req,
+} from "./http";
+import { authenticateUser, createUser, generateJWT } from "@/lib/auth";
 import {
   addDomain,
   getUserDomains,
@@ -23,6 +31,8 @@ import {
   normalizeDomain,
 } from "@/lib/email-dns-readiness";
 import { query } from "@/lib/database";
+import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
+import { reserveDailySend } from "@/lib/quotas";
 
 // JSONB columns can come back as string or already-parsed; normalize to array.
 function safeParseEmailArray(value: unknown): unknown[] {
@@ -65,13 +75,7 @@ export function health(): Response {
 }
 
 export async function setup(): Promise<Response> {
-  try {
-    await initializeDefaultUser();
-    return json({ success: true, message: "Default user initialized successfully" });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return json({ success: false, error: message }, 500);
-  }
+  throw new HttpError(404, { error: "Not found" });
 }
 
 // ----------------------------------------------------------------------------
@@ -79,16 +83,60 @@ export async function setup(): Promise<Response> {
 // ----------------------------------------------------------------------------
 
 const loginSchema = z.object({
-  email: z.string().email("Invalid email format"),
-  password: z.string().min(1, "Password is required"),
+  email: z.string().email("Invalid email format").max(255),
+  password: z.string().min(1, "Password is required").max(200).refine(
+    (value) => Buffer.byteLength(value, "utf8") <= 72,
+    "Password is too long",
+  ),
 });
 
 export async function login(req: Req): Promise<Response> {
-  const { email, password } = loginSchema.parse(await req.json());
+  const { email, password } = loginSchema.parse(await jsonBody(req));
+  const ipRate = await checkRateLimit(`auth:login:${requestAddress(req)}`, 10, 60_000);
+  const emailRate = await checkRateLimit(`auth:login:${email}`, 10, 60_000);
+  if (!ipRate.allowed || !emailRate.allowed) {
+    throw new HttpError(429, { error: "Too many sign-in attempts. Try again later." });
+  }
   const user = await authenticateUser(email, password);
   if (!user) return json({ error: "Invalid email or password" }, 401);
   const token = generateJWT(user);
   return json({ success: true, data: { user, token } });
+}
+
+const signupSchema = z.object({
+  email: z.string().email("Invalid email format").max(255),
+  password: z.string().min(12, "Password must be at least 12 characters").max(200).refine(
+    (value) => Buffer.byteLength(value, "utf8") <= 72,
+    "Password is too long",
+  ),
+  name: z.string().trim().min(1).max(255).optional(),
+});
+
+export async function signup(req: Req): Promise<Response> {
+  const { email, password, name } = signupSchema.parse(await jsonBody(req));
+  const ipRate = await checkRateLimit(`auth:signup:${requestAddress(req)}`, 3, 60 * 60_000);
+  const emailRate = await checkRateLimit(`auth:signup:${email}`, 3, 60 * 60_000);
+  const globalRate = await checkRateLimit("auth:signup:global", 100, 60 * 60_000);
+  if (!ipRate.allowed || !emailRate.allowed || !globalRate.allowed) {
+    throw new HttpError(429, { error: "Too many sign-up attempts. Try again later." });
+  }
+
+  let created: Awaited<ReturnType<typeof createUser>>;
+  try {
+    created = await createUser(email, password, name);
+  } catch (error) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? error.code
+        : undefined;
+    if (code === "23505") {
+      return json({ error: "An account with that email may already exist." }, 409);
+    }
+    throw error;
+  }
+
+  const user = { id: created.id, email: created.email, name: created.name ?? undefined };
+  return json({ success: true, data: { user, token: generateJWT(user) } }, 201);
 }
 
 export function me(req: Req): Response {
@@ -110,15 +158,15 @@ export async function listDomains(req: Req): Promise<Response> {
 
 export async function createDomain(req: Req): Promise<Response> {
   const user = requireUser(req);
-  const { domain } = addDomainSchema.parse(await req.json());
+  const { domain } = addDomainSchema.parse(await jsonBody(req));
   const result = await addDomain(user.id, domain);
   return json({ success: true, data: result });
 }
 
 export async function getDomain(req: Req): Promise<Response> {
   const user = requireUser(req);
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) {
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) {
     return json({ error: "Domain not found" }, 404);
   }
   return json({ success: true, data: { domain } });
@@ -126,17 +174,18 @@ export async function getDomain(req: Req): Promise<Response> {
 
 export async function removeDomain(req: Req): Promise<Response> {
   const user = requireUser(req);
-  await deleteDomain(req.params.id, user.id);
+  await deleteDomain(pathUuid(req), user.id);
   return json({ success: true, message: "Domain deleted." });
 }
 
 export async function verifyDomain(req: Req): Promise<Response> {
   const user = requireUser(req);
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) {
+  const domainId = pathUuid(req);
+  const domain = await getDomainById(domainId, user.id);
+  if (!domain) {
     return json({ error: "Domain not found" }, 404);
   }
-  const status = await checkDomainVerification(req.params.id);
+  const status = await checkDomainVerification(domainId, user.id);
   return json({
     success: true,
     data: { status, verified: status === "verified" },
@@ -154,12 +203,12 @@ export async function verifyDomain(req: Req): Promise<Response> {
 
 const createApiKeySchema = z.object({
   domainId: z.string().uuid("Invalid domain ID"),
-  keyName: z.string().min(1, "Key name is required"),
-  permissions: z.array(z.string()).optional().default(["send"]),
+  keyName: z.string().trim().min(1, "Key name is required").max(255),
+  permissions: z.array(z.enum(["send", "receive", "webhooks"])).max(3).optional().default(["send"]),
 });
 
 const updateApiKeySchema = z.object({
-  permissions: z.array(z.string()).min(1, "At least one permission is required"),
+  permissions: z.array(z.enum(["send", "receive", "webhooks"])).min(1).max(3),
 });
 
 export async function listApiKeys(req: Req): Promise<Response> {
@@ -170,10 +219,10 @@ export async function listApiKeys(req: Req): Promise<Response> {
 
 export async function createApiKey(req: Req): Promise<Response> {
   const user = requireUser(req);
-  const { domainId, keyName, permissions } = createApiKeySchema.parse(await req.json());
+  const { domainId, keyName, permissions } = createApiKeySchema.parse(await jsonBody(req));
 
-  const domain = await getDomainById(domainId);
-  if (!domain || domain.user_id !== user.id) {
+  const domain = await getDomainById(domainId, user.id);
+  if (!domain) {
     return json({ error: "Domain not found or you don't have access." }, 404);
   }
   if (domain.status !== "verified") {
@@ -190,14 +239,14 @@ export async function createApiKey(req: Req): Promise<Response> {
 
 export async function updateApiKey(req: Req): Promise<Response> {
   const user = requireUser(req);
-  const { permissions } = updateApiKeySchema.parse(await req.json());
-  await updateApiKeyPermissions(req.params.id, user.id, permissions);
+  const { permissions } = updateApiKeySchema.parse(await jsonBody(req));
+  await updateApiKeyPermissions(pathUuid(req), user.id, permissions);
   return json({ success: true, message: "API key permissions updated." });
 }
 
 export async function removeApiKey(req: Req): Promise<Response> {
   const user = requireUser(req);
-  await deleteApiKey(req.params.id, user.id);
+  await deleteApiKey(pathUuid(req), user.id);
   return json({ success: true, message: "API key deleted." });
 }
 
@@ -232,24 +281,27 @@ const attachmentSchema = z.object({
 // and validate loosely (display names allowed) for drop-in Resend compatibility.
 const addressField = z
   .string()
+  .max(320)
+  .refine((v) => !/[\r\n]/.test(v), "Invalid email address")
   .refine((v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(bareAddress(v)), "Invalid email address");
 const asArray = (v: unknown) => (typeof v === "string" ? [v] : v);
 
 const sendEmailSchema = z
   .object({
     from: addressField,
-    to: z.preprocess(asArray, z.array(addressField).min(1, "Add at least one recipient.")),
-    cc: z.preprocess(asArray, z.array(addressField).optional()),
-    bcc: z.preprocess(asArray, z.array(addressField).optional()),
+     to: z.preprocess(asArray, z.array(addressField).min(1, "Add at least one recipient.").max(100)),
+     cc: z.preprocess(asArray, z.array(addressField).max(100).optional()),
+     bcc: z.preprocess(asArray, z.array(addressField).max(100).optional()),
     subject: z
       .string()
       .min(1, "Subject is required.")
+      .max(500)
       .regex(/^[^\r\n]*$/, "Subject can't contain line breaks."),
     // Some clients send the unused body as null (not omitted) — accept null too.
-    html: z.string().nullish().transform((v) => v ?? undefined),
-    text: z.string().nullish().transform((v) => v ?? undefined),
+    html: z.string().max(10 * 1024 * 1024).nullish().transform((v) => v ?? undefined),
+    text: z.string().max(10 * 1024 * 1024).nullish().transform((v) => v ?? undefined),
     attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS).optional(),
-    reply_to: z.preprocess(asArray, z.array(addressField).optional()),
+    reply_to: z.preprocess(asArray, z.array(addressField).max(20).optional()),
     // Resend tags are [{name,value}]; clients commonly send this key even when
     // empty ([]). Also accept a legacy { k: v } record. Empty/absent => undefined.
     tags: z.preprocess(
@@ -261,7 +313,7 @@ const sendEmailSchema = z
         }
         return v;
       },
-      z.array(z.object({ name: z.string(), value: z.string() })).optional()
+      z.array(z.object({ name: z.string().min(1).max(256), value: z.string().max(256) })).max(50).optional()
     ),
   })
   .refine((data) => data.html || data.text, {
@@ -281,14 +333,23 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
   }
 
   const { from, to, cc, bcc, subject, html, text, attachments, reply_to, tags } =
-    sendEmailSchema.parse(await req.json());
+    sendEmailSchema.parse(await jsonBody(req));
 
-  const domain = await getDomainById(apiKey.domain_id);
+  const domain = await getDomainById(apiKey.domain_id, apiKey.user_id);
   if (!domain) return json({ error: "Domain not found" }, 404);
   if (domain.status !== "verified") return json({ error: "Domain isn't verified. Verify DNS and try again." }, 400);
 
-  if (bareAddress(from).split("@")[1] !== domain.domain) {
+  if (bareAddress(from).split("@")[1]?.toLowerCase() !== domain.domain.toLowerCase()) {
     return json({ error: `From email must use the domain ${domain.domain}.` }, 400);
+  }
+
+  const sendRate = await checkRateLimit(`send:${apiKey.user_id}`, 60, 60_000);
+  const ipRate = await checkRateLimit(`send-ip:${requestAddress(req)}`, 20, 60_000);
+  if (!sendRate.allowed || !ipRate.allowed) {
+    throw new HttpError(429, { error: "Sending too quickly. Try again later." });
+  }
+  if (!(await reserveDailySend(apiKey.user_id))) {
+    throw new HttpError(429, { error: "Daily sending limit reached." });
   }
 
   const sesAttachments = attachments?.map((att) => ({
@@ -373,18 +434,24 @@ export async function emailLogs(req: Req): Promise<Response> {
   }
 
   const url = new URL(req.url);
-  const page = parseInt(url.searchParams.get("page") || "1");
-  const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 100);
-  const domainId = url.searchParams.get("domain_id");
-  const status = url.searchParams.get("status");
+  const params = z.object({
+    page: z.coerce.number().int().min(1).max(10_000).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    domain_id: z.string().uuid().optional(),
+    status: z.enum(["pending", "sent", "failed", "delivered", "bounced", "complained"]).optional(),
+  }).parse(Object.fromEntries(url.searchParams));
+  const { page, limit, domain_id: domainId, status } = params;
   const offset = (page - 1) * limit;
 
   let domainIds: string[] = [];
+  let scopedUserId: string | null = null;
   if (auth.startsWith("Bearer wka_")) {
     const apiKey = await requireApiKey(req);
     domainIds = [apiKey.domain_id];
+    scopedUserId = apiKey.user_id;
   } else {
     const user = requireUser(req);
+    scopedUserId = user.id;
     const result = await query("SELECT id FROM domains WHERE user_id = $1", [user.id]);
     domainIds = result.rows.map((d) => d.id);
   }
@@ -396,33 +463,35 @@ export async function emailLogs(req: Req): Promise<Response> {
     });
   }
 
-  const whereConditions = ["el.domain_id = ANY($1)"];
-  const queryParams: (string | string[])[] = [domainIds];
-  if (domainId) {
-    whereConditions.push(`el.domain_id = $${queryParams.length + 1}`);
-    queryParams.push(domainId);
-  }
-  if (status) {
-    whereConditions.push(`el.status = $${queryParams.length + 1}`);
-    queryParams.push(status);
-  }
-  const whereClause = whereConditions.join(" AND ");
+  const queryParams: (string | string[] | number | null)[] = [
+    domainIds,
+    domainId ?? null,
+    status ?? null,
+    scopedUserId,
+  ];
 
   const countResult = await query(
-    `SELECT COUNT(*) as count FROM email_logs el WHERE ${whereClause}`,
+    `SELECT COUNT(*) as count FROM email_logs el
+     WHERE el.domain_id = ANY($1)
+       AND ($2::uuid IS NULL OR el.domain_id = $2)
+       AND ($3::text IS NULL OR el.status = $3)
+       AND EXISTS (SELECT 1 FROM domains d WHERE d.id = el.domain_id AND d.user_id = $4)`,
     queryParams
   );
   const totalCount = parseInt(countResult.rows[0].count);
 
   const emailLogsResult = await query(
-    `SELECT el.*, d.domain as domain_name, ak.key_name as api_key_name
-     FROM email_logs el
-     LEFT JOIN domains d ON el.domain_id = d.id
+     `SELECT el.*, d.domain as domain_name, ak.key_name as api_key_name
+      FROM email_logs el
+      JOIN domains d ON el.domain_id = d.id AND d.user_id = $4
      LEFT JOIN api_keys ak ON el.api_key_id = ak.id
-     WHERE ${whereClause}
+       AND ak.user_id = d.user_id AND ak.domain_id = el.domain_id
+     WHERE el.domain_id = ANY($1)
+       AND ($2::uuid IS NULL OR el.domain_id = $2)
+       AND ($3::text IS NULL OR el.status = $3)
      ORDER BY el.created_at DESC
-     LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`,
-    [...queryParams, limit, offset]
+     LIMIT $5 OFFSET $6`,
+     [...queryParams, limit, offset]
   );
 
   const emails = emailLogsResult.rows.map((row) => ({
@@ -449,20 +518,23 @@ export async function getEmail(req: Req): Promise<Response> {
   const emailResult = await query(
     `SELECT el.*, d.domain as domain_name, d.user_id as domain_user_id, ak.key_name as api_key_name
      FROM email_logs el
-     LEFT JOIN domains d ON el.domain_id = d.id
+     JOIN domains d ON el.domain_id = d.id AND d.user_id = $2
      LEFT JOIN api_keys ak ON el.api_key_id = ak.id
+       AND ak.user_id = d.user_id AND ak.domain_id = el.domain_id
      WHERE el.id = $1`,
-    [req.params.id]
+    [pathUuid(req), user.id]
   );
   if (emailResult.rows.length === 0) return json({ error: "Email not found" }, 404);
 
   const emailData = emailResult.rows[0];
-  if (emailData.domain_user_id !== user.id) return json({ error: "Email not found" }, 404);
-
   const webhookResult = await query(
     `SELECT id, event_type, event_data, created_at
-     FROM webhook_events WHERE email_log_id = $1 ORDER BY created_at DESC`,
-    [req.params.id]
+      FROM webhook_events we
+      JOIN email_logs el ON el.id = we.email_log_id
+      JOIN domains d ON d.id = el.domain_id AND d.user_id = $2
+      WHERE we.email_log_id = $1
+      ORDER BY we.created_at DESC`,
+    [pathUuid(req), user.id]
   );
 
   const email = {
@@ -522,21 +594,14 @@ async function resolveCname(name: string, errors: string[]): Promise<string[]> {
 }
 
 export async function emailDnsChecker(req: Req): Promise<Response> {
-  let body: { domain?: unknown; dkimSelector?: unknown };
-  try {
-    body = (await req.json()) as { domain?: unknown; dkimSelector?: unknown };
-  } catch {
-    return json({ error: "Send a JSON body with a domain." }, 400);
-  }
-  if (typeof body.domain !== "string") {
-    return json({ error: "Domain is required." }, 400);
-  }
+  const body = z.object({
+    domain: z.string().min(1),
+    dkimSelector: z.string().nullable().optional(),
+  }).parse(await jsonBody(req));
 
   try {
     const domain = normalizeDomain(body.domain);
-    const dkimSelector = normalizeDkimSelector(
-      typeof body.dkimSelector === "string" ? body.dkimSelector : null
-    );
+    const dkimSelector = normalizeDkimSelector(body.dkimSelector);
     const lookupErrors: string[] = [];
     const dkimName = dkimSelector ? `${dkimSelector}._domainkey.${domain}` : null;
 

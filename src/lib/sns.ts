@@ -65,6 +65,16 @@ function isValidCertUrl(rawUrl: string): boolean {
   return true;
 }
 
+function isValidSnsUrl(rawUrl: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  return url.protocol === "https:" && /^sns\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$/i.test(url.hostname);
+}
+
 async function fetchCert(certUrl: string): Promise<string> {
   const cached = certCache.get(certUrl);
   if (cached) return cached;
@@ -105,7 +115,9 @@ export async function validateSnsMessage(message: SnsMessage): Promise<boolean> 
     const stringToSign = buildStringToSign(message);
     if (stringToSign === null) return false;
 
-    // SignatureVersion 1 -> SHA1, 2 -> SHA256.
+    if (message.SignatureVersion !== "1" && message.SignatureVersion !== "2") {
+      return false;
+    }
     const algo = message.SignatureVersion === "2" ? "RSA-SHA256" : "RSA-SHA1";
 
     const pem = await fetchCert(certUrl);
@@ -123,7 +135,7 @@ export async function validateSnsMessage(message: SnsMessage): Promise<boolean> 
  * Caller MUST validate the message signature first.
  */
 export async function confirmSubscription(message: SnsMessage): Promise<boolean> {
-  if (!message.SubscribeURL) return false;
+  if (!message.SubscribeURL || !isValidSnsUrl(message.SubscribeURL)) return false;
   try {
     const res = await fetch(message.SubscribeURL);
     if (!res.ok) {

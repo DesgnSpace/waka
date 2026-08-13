@@ -1,8 +1,10 @@
 import crypto from "crypto";
+import { z } from "zod";
 import {
   sessionUser,
   sessionCookie,
   clearSessionCookie,
+  pathUuid,
   type Req,
 } from "./http";
 import { authenticateUser, generateJWT, type AuthUser } from "@/lib/auth";
@@ -16,6 +18,7 @@ import {
 } from "@/lib/domains";
 import { getDomainApiKeys, generateApiKey, deleteApiKey } from "@/lib/api-keys";
 import { query } from "@/lib/database";
+import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 
 // --- helpers -----------------------------------------------------------------
 
@@ -379,10 +382,26 @@ function loginView(error = ""): string {
 
 export async function doLogin(req: Req): Promise<Response> {
   const form = await req.formData();
-  const user = await authenticateUser(
-    String(form.get("email") ?? ""),
-    String(form.get("password") ?? "")
-  );
+  const parsed = z.object({
+    email: z.string().email().max(255),
+    password: z.string().min(1).max(200).refine(
+      (value) => Buffer.byteLength(value, "utf8") <= 72,
+      "Password is too long",
+    ),
+  }).safeParse({
+    email: String(form.get("email") ?? "").trim().toLowerCase(),
+    password: String(form.get("password") ?? ""),
+  });
+  if (!parsed.success) {
+    return html(layout("Sign in", loginView("Invalid email or password.")), { status: 400 });
+  }
+  const ipRate = await checkRateLimit(`auth:login:${requestAddress(req)}`, 10, 60_000);
+  const emailRate = await checkRateLimit(`auth:login:${parsed.data.email}`, 10, 60_000);
+  if (!ipRate.allowed || !emailRate.allowed) {
+    return html(layout("Sign in", loginView("Try again later.")), { status: 429 });
+  }
+  const { email, password } = parsed.data;
+  const user = await authenticateUser(email, password);
   if (!user) return html(layout("Sign in", loginView("Invalid email or password.")));
   return seeOther("/dashboard", { "Set-Cookie": sessionCookie(generateJWT(user)) });
 }
@@ -464,7 +483,7 @@ export async function uiAddDomain(req: Req): Promise<Response> {
   const domain = String((await req.formData()).get("domain") ?? "").trim();
   if (!domain) return seeOther("/dashboard?m=domain-required");
   try {
-    const result = (await addDomain(user.id, domain)) as { domain: { id: string } };
+    const result = await addDomain(user.id, domain);
     return seeOther(`/ui/domains/${result.domain.id}`);
   } catch (err) {
     console.error("add domain failed:", err);
@@ -475,8 +494,9 @@ export async function uiAddDomain(req: Req): Promise<Response> {
 export async function uiDeleteDomain(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
+  const domainId = pathUuid(req);
   try {
-    await deleteDomain(req.params.id, user.id);
+    await deleteDomain(domainId, user.id);
   } catch (err) {
     console.error("delete domain failed:", err);
   }
@@ -486,9 +506,10 @@ export async function uiDeleteDomain(req: Req): Promise<Response> {
 export async function uiVerifyDomain(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) return seeOther("/dashboard");
-  const status = await checkDomainVerification(req.params.id);
+  const domainId = pathUuid(req);
+  const domain = await getDomainById(domainId, user.id);
+  if (!domain) return seeOther("/dashboard");
+  const status = await checkDomainVerification(domainId, user.id);
   return seeOther(`/ui/domains/${domain.id}?m=${status === "verified" ? "verified" : "pending"}`);
 }
 
@@ -555,8 +576,8 @@ function domainOverview(
 export async function uiDomain(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) {
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) {
     return html(layout("Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user), { status: 404 });
   }
   const body = detailHead(domain as DomainRow, "overview") +
@@ -567,28 +588,29 @@ export async function uiDomain(req: Req): Promise<Response> {
 export async function uiSetMailFrom(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
+  const domainId = pathUuid(req);
   const mailFrom = String((await req.formData()).get("mailFrom") ?? "");
   try {
-    await updateMailFromDomain(req.params.id, user.id, mailFrom);
+    await updateMailFromDomain(domainId, user.id, mailFrom);
   } catch (err) {
     // Fail loud: re-render the overview with the real reason (bad subdomain,
     // missing ses:SetIdentityMailFromDomain permission, SES error, …).
     console.error("set return-path failed:", err);
-    const domain = await getDomainById(req.params.id);
-    if (!domain || domain.user_id !== user.id) return seeOther("/dashboard");
+    const domain = await getDomainById(domainId, user.id);
+    if (!domain) return seeOther("/dashboard");
     const msg = err instanceof Error ? err.message : "Could not set the return-path domain.";
     const body = detailHead(domain as DomainRow, "overview") +
       domainOverview(domain as DomainRow & { dns_records?: DnsRecord[]; mail_from_domain?: string | null }, alert("err", msg));
     return html(layout(domain.domain, body, user), { status: 400 });
   }
-  return seeOther(`/ui/domains/${req.params.id}?m=mailfrom-saved`);
+  return seeOther(`/ui/domains/${domainId}?m=mailfrom-saved`);
 }
 
 export async function uiDomainDns(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) {
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) {
     return new Response("Domain not found", { status: 404 });
   }
   const records: DnsRecord[] = Array.isArray(domain.dns_records) ? (domain.dns_records as DnsRecord[]) : [];
@@ -680,8 +702,8 @@ function domainLogsView(logs: Array<{ id: string; from_email: string; to_emails:
 export async function uiDomainLogs(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) {
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) {
     return html(layout("Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user), { status: 404 });
   }
   const logs = await getDomainEmailLogs(user.id, domain.id);
@@ -734,28 +756,28 @@ function keysBody(domain: DomainRow, keys: unknown, banner = ""): string {
 export async function uiDomainKeys(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) {
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) {
     return html(layout("Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user), { status: 404 });
   }
-  const keys = await getDomainApiKeys(domain.id);
+  const keys = await getDomainApiKeys(domain.id, user.id);
   return html(layout(`${domain.domain} keys`, keysBody(domain as DomainRow, keys, flashFrom(req)), user));
 }
 
 export async function uiCreateDomainKey(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) {
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) {
     return html(layout("Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user), { status: 404 });
   }
-  const keyName = String((await req.formData()).get("keyName") ?? "").trim();
+  const keyName = String((await req.formData()).get("keyName") ?? "").trim().slice(0, 255);
   let banner = "";
   try {
     if (domain.status !== "verified") banner = alert("err", "Domain must be verified first.");
     else if (!keyName) banner = alert("err", "Key name is required.");
     else {
-      const created = (await generateApiKey(user.id, domain.id, keyName)) as { key: string };
+      const created = await generateApiKey(user.id, domain.id, keyName);
       banner = `<div class="block">
         <div class="block-title">Copy this key now — it is not shown again</div>
         <div class="keyout">${copyBtn(created.key, "Copy API key")}<code>${esc(created.key)}</code></div>
@@ -764,17 +786,17 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
   } catch (err) {
     banner = alert("err", err instanceof Error ? err.message : "Failed to create key.");
   }
-  const keys = await getDomainApiKeys(domain.id);
+  const keys = await getDomainApiKeys(domain.id, user.id);
   return html(layout(`${domain.domain} keys`, keysBody(domain as DomainRow, keys, banner), user));
 }
 
 export async function uiDeleteDomainKey(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
-  const domain = await getDomainById(req.params.id);
-  if (!domain || domain.user_id !== user.id) return seeOther("/dashboard");
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) return seeOther("/dashboard");
   try {
-    await deleteApiKey(req.params.keyId, user.id);
+    await deleteApiKey(pathUuid(req, "keyId"), user.id);
   } catch (err) {
     console.error("delete key failed:", err);
   }

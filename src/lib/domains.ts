@@ -20,11 +20,13 @@ export interface DNSRecord {
 }
 
 export interface DomainSetupResult {
-  domain: Domain;
+  domain: PublicDomain;
   dnsRecords: DNSRecord[];
   sesConfigurationSet?: string;
   setupInstructions: string;
 }
+
+export type PublicDomain = Omit<Domain, "verification_token" | "smtp_credentials">;
 
 // Helper function to safely parse DNS records (handles both string and object)
 function safeParseDNSRecords(dnsRecords: unknown): DNSRecord[] {
@@ -42,32 +44,20 @@ function safeParseDNSRecords(dnsRecords: unknown): DNSRecord[] {
   return [];
 }
 
-// Helper function to safely stringify JSON with circular reference protection
 function safeJSONStringify(obj: unknown): string {
-  try {
-    return JSON.stringify(obj);
-  } catch (error) {
-    console.error("JSON stringify error:", error);
-    console.error("Object causing error:", obj);
-    // Try to create a safe version by copying only plain properties
-    if (Array.isArray(obj)) {
-      return JSON.stringify(
-        obj.map((item: Record<string, unknown>) => ({
-          type: item.type,
-          name: item.name,
-          value: item.value || item.data,
-          ttl: item.ttl,
-        }))
-      );
-    }
-    return "[]";
-  }
+  return JSON.stringify(obj);
+}
+
+function publicDomain(domain: Domain): PublicDomain {
+  const { verification_token: _verificationToken, smtp_credentials: _smtpCredentials, ...safe } = domain;
+  return safe;
 }
 
 export async function addDomain(
   userId: string,
   domainName: string
 ): Promise<DomainSetupResult> {
+  domainName = domainName.trim().toLowerCase();
   // Validate domain format
   if (!isValidDomain(domainName)) {
     throw new Error("Enter a valid domain such as example.com.");
@@ -76,6 +66,9 @@ export async function addDomain(
   // Check if domain already exists in our database
   const existingDomain = await getDomainByName(domainName);
   if (existingDomain) {
+    if (existingDomain.user_id !== userId) {
+      throw new Error("That domain is already registered.");
+    }
     // If domain exists, check and complete its setup
     return await verifyAndCompleteExistingDomain(userId, existingDomain);
   }
@@ -118,7 +111,8 @@ export async function addDomain(
     const result = await query(
       `INSERT INTO domains (user_id, domain, status, ses_configuration_set, dns_records, verification_token) 
        VALUES ($1, $2, $3, $4, $5, $6) 
-       RETURNING *`,
+       RETURNING id, user_id, domain, status, ses_identity_arn, ses_configuration_set,
+                 do_domain_id, mail_from_domain, dns_records, created_at, updated_at`,
       [
         userId,
         domainName,
@@ -133,13 +127,13 @@ export async function addDomain(
       throw new Error("Couldn't save domain. Try again.");
     }
 
-    const domain = {
+    const domain: Domain = {
       ...result.rows[0],
       dns_records: safeParseDNSRecords(result.rows[0].dns_records),
     };
 
     return {
-      domain,
+      domain: publicDomain(domain),
       dnsRecords,
       sesConfigurationSet: configurationSet,
       setupInstructions,
@@ -248,23 +242,24 @@ async function verifyAndCompleteExistingDomain(
 
     // 6. Update database if needed
     if (needsUpdate) {
-      const updateQuery = `
-        UPDATE domains 
-        SET ${Object.keys(updateFields)
-          .map((key, index) => `${key} = $${index + 2}`)
-          .join(", ")}, 
-            dns_records = $${Object.keys(updateFields).length + 2},
-            updated_at = NOW()
-        WHERE id = $1 
-        RETURNING *`;
-
-      const queryParams = [
-        existingDomain.id,
-        ...Object.values(updateFields),
-        safeJSONStringify(dnsRecords || []),
-      ];
-
-      const result = await query(updateQuery, queryParams);
+      const result = await query(
+        `UPDATE domains
+         SET verification_token = COALESCE($2, verification_token),
+             ses_configuration_set = COALESCE($3, ses_configuration_set),
+             dns_records = $4,
+             updated_at = NOW()
+         WHERE id = $1 AND user_id = $5
+         RETURNING id, user_id, domain, status, ses_identity_arn,
+                    ses_configuration_set, do_domain_id, mail_from_domain,
+                    dns_records, verification_token, created_at, updated_at`,
+        [
+          existingDomain.id,
+          updateFields.verification_token ?? null,
+          updateFields.ses_configuration_set ?? null,
+          safeJSONStringify(dnsRecords || []),
+          userId,
+        ],
+      );
 
       if (result.rows.length > 0) {
         const updatedDomain = {
@@ -273,7 +268,7 @@ async function verifyAndCompleteExistingDomain(
         };
 
         return {
-          domain: updatedDomain,
+          domain: publicDomain(updatedDomain),
           dnsRecords,
           sesConfigurationSet: configurationSet,
           setupInstructions,
@@ -283,7 +278,7 @@ async function verifyAndCompleteExistingDomain(
 
     // 7. Return existing domain with current setup info
     return {
-      domain: existingDomain,
+      domain: publicDomain(existingDomain),
       dnsRecords,
       sesConfigurationSet: configurationSet,
       setupInstructions: `Domain already exists. ${setupInstructions}`,
@@ -294,10 +289,12 @@ async function verifyAndCompleteExistingDomain(
   }
 }
 
-export async function getUserDomains(userId: string): Promise<Domain[]> {
+export async function getUserDomains(userId: string): Promise<PublicDomain[]> {
   try {
     const result = await query(
-      `SELECT * FROM domains 
+      `SELECT id, user_id, domain, status, ses_identity_arn, ses_configuration_set,
+              do_domain_id, mail_from_domain, dns_records, created_at, updated_at
+       FROM domains
        WHERE user_id = $1 
        ORDER BY created_at DESC`,
       [userId]
@@ -313,11 +310,19 @@ export async function getUserDomains(userId: string): Promise<Domain[]> {
   }
 }
 
-export async function getDomainById(domainId: string): Promise<Domain | null> {
+export async function getDomainById(
+  domainId: string,
+  userId: string,
+): Promise<PublicDomain | null> {
   try {
-    const result = await query("SELECT * FROM domains WHERE id = $1 LIMIT 1", [
-      domainId,
-    ]);
+    const result = await query(
+      `SELECT id, user_id, domain, status, ses_identity_arn, ses_configuration_set,
+              do_domain_id, mail_from_domain, dns_records, created_at, updated_at
+       FROM domains
+       WHERE id = $1 AND user_id = $2
+       LIMIT 1`,
+      [domainId, userId],
+    );
 
     if (result.rows.length === 0) {
       return null;
@@ -339,8 +344,13 @@ export async function getDomainByName(
 ): Promise<Domain | null> {
   try {
     const result = await query(
-      "SELECT * FROM domains WHERE domain = $1 LIMIT 1",
-      [domainName]
+      `SELECT id, user_id, domain, status, ses_identity_arn, ses_configuration_set,
+              do_domain_id, mail_from_domain, dns_records, verification_token,
+              created_at, updated_at
+       FROM domains
+       WHERE LOWER(domain) = LOWER($1)
+       LIMIT 1`,
+      [domainName.trim()]
     );
 
     if (result.rows.length === 0) {
@@ -360,13 +370,14 @@ export async function getDomainByName(
 
 export async function updateDomainStatus(
   domainId: string,
-  status: Domain["status"]
+  status: Domain["status"],
+  userId: string,
 ): Promise<void> {
   try {
-    const result = await query("UPDATE domains SET status = $1 WHERE id = $2", [
-      status,
-      domainId,
-    ]);
+    const result = await query(
+      "UPDATE domains SET status = $1 WHERE id = $2 AND user_id = $3",
+      [status, domainId, userId],
+    );
 
     if (result.rowCount === 0) {
       throw new Error("Domain not found.");
@@ -378,9 +389,10 @@ export async function updateDomainStatus(
 }
 
 export async function checkDomainVerification(
-  domainId: string
+  domainId: string,
+  userId: string,
 ): Promise<Domain["status"]> {
-  const domain = await getDomainById(domainId);
+  const domain = await getDomainById(domainId, userId);
   if (!domain) {
     throw new Error("Domain not found.");
   }
@@ -396,7 +408,7 @@ export async function checkDomainVerification(
     }
 
     if (newStatus !== domain.status) {
-      await updateDomainStatus(domainId, newStatus);
+      await updateDomainStatus(domainId, newStatus, userId);
     }
 
     return newStatus;
@@ -410,7 +422,7 @@ export async function deleteDomain(
   domainId: string,
   userId: string
 ): Promise<void> {
-  const domain = await getDomainById(domainId);
+  const domain = await getDomainById(domainId, userId);
   if (!domain || domain.user_id !== userId) {
     throw new Error("Domain not found or you don't have access.");
   }
@@ -418,9 +430,6 @@ export async function deleteDomain(
   try {
     // Delete from SES (if needed)
     // await deleteDomainIdentity(domain.domain)
-
-    // Delete API keys associated with this domain
-    await query("DELETE FROM api_keys WHERE domain_id = $1", [domainId]);
 
     // Delete domain record
     const result = await query(
@@ -445,7 +454,7 @@ export async function updateMailFromDomain(
   userId: string,
   mailFromRaw: string
 ): Promise<{ mailFrom: string | null; dnsRecords: DNSRecord[] }> {
-  const domain = await getDomainById(domainId);
+  const domain = await getDomainById(domainId, userId);
   if (!domain || domain.user_id !== userId) {
     throw new Error("Domain not found or you don't have access.");
   }
@@ -468,8 +477,8 @@ export async function updateMailFromDomain(
   const dnsRecords = mailFrom ? [...base, ...mailFromRecords(mailFrom)] : base;
 
   await query(
-    "UPDATE domains SET mail_from_domain = $1, dns_records = $2, updated_at = NOW() WHERE id = $3",
-    [mailFrom, safeJSONStringify(dnsRecords), domainId]
+    "UPDATE domains SET mail_from_domain = $1, dns_records = $2, updated_at = NOW() WHERE id = $3 AND user_id = $4",
+    [mailFrom, safeJSONStringify(dnsRecords), domainId, userId]
   );
 
   return { mailFrom, dnsRecords };
@@ -478,12 +487,12 @@ export async function updateMailFromDomain(
 export async function refreshAllDomainStatuses(): Promise<void> {
   try {
     const result = await query(
-      "SELECT id, domain, status FROM domains WHERE status = 'pending'"
+      "SELECT id, domain, status, user_id FROM domains WHERE status = 'pending'"
     );
 
     for (const domain of result.rows) {
       try {
-        await checkDomainVerification(domain.id);
+        await checkDomainVerification(domain.id, domain.user_id);
         // Small delay to avoid rate limiting
         await new Promise((resolve) => setTimeout(resolve, 100));
       } catch (error) {
