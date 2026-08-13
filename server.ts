@@ -35,6 +35,7 @@ const server = Bun.serve({
     "/api/health": methods({ GET: h.health }),
     "/api/setup": methods({ POST: h.setup }),
     "/api/auth/login": methods({ POST: h.login }),
+    "/api/auth/signup": methods({ POST: h.signup }),
     "/api/auth/me": methods({ GET: h.me }),
     "/api/domains": methods({ GET: h.listDomains, POST: h.createDomain }),
     "/api/domains/:id": methods({ GET: h.getDomain, DELETE: h.removeDomain }),
@@ -50,7 +51,7 @@ const server = Bun.serve({
     // --- HTMX dashboard (cookie session, same JWT) ---
     "/": methods({ GET: ui.home }),
     "/login": methods({ GET: ui.loginPage, POST: ui.doLogin }),
-    "/logout": methods({ GET: ui.logout, POST: ui.logout }),
+    "/logout": methods({ POST: ui.logout }),
     "/dashboard": methods({ GET: ui.dashboard }),
     "/ui/domains": methods({ GET: ui.uiDomains, POST: ui.uiAddDomain }),
     "/ui/domains/:id": methods({ GET: ui.uiDomain }),

@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/bun";
-import { ZodError } from "zod";
+import crypto from "crypto";
+import { z, ZodError } from "zod";
 import { verifyJWT, type AuthUser } from "@/lib/auth";
 import { verifyApiKey } from "@/lib/api-keys";
 import type { ApiKey } from "@/lib/database";
@@ -22,7 +23,7 @@ function allowedOrigin(origin: string | null): string | null {
   const configured = process.env.CORS_ORIGIN?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
   const domainOrigin = process.env.DOMAIN ? normalizeOrigin(process.env.DOMAIN) : null;
   const allowed = configured.length > 0 ? configured : domainOrigin ? [domainOrigin] : [];
-  if (allowed.includes("*")) return origin; // reflect origin; * is invalid with credentials
+  if (allowed.includes("*")) return null;
   if (allowed.length === 0) return null; // same-origin only
   if (!origin) return null;
   return allowed.includes(origin) ? origin : null;
@@ -68,6 +69,32 @@ export class HttpError extends Error {
 // A routed Bun request carries path params (e.g. /api/domains/:id).
 export type Req = Request & { params: Record<string, string> };
 type Handler = (req: Req) => Promise<Response> | Response;
+
+export function pathUuid(req: Req, name = "id"): string {
+  return z.string().uuid("Invalid identifier").parse(req.params[name]);
+}
+
+export async function jsonBody(req: Request): Promise<unknown> {
+  const maxBytes = 15 * 1024 * 1024;
+  const contentLength = req.headers.get("content-length");
+  if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > maxBytes) {
+    throw new HttpError(413, { error: "Request body is too large." });
+  }
+  let body: string;
+  try {
+    body = await req.text();
+  } catch {
+    throw new HttpError(400, { error: "Request body must be valid JSON." });
+  }
+  if (new TextEncoder().encode(body).byteLength > maxBytes) {
+    throw new HttpError(413, { error: "Request body is too large." });
+  }
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new HttpError(400, { error: "Request body must be valid JSON." });
+  }
+}
 
 // Wrap a handler with uniform error handling and CORS. ZodError -> 400,
 // HttpError -> its status, anything else -> 500.
@@ -121,7 +148,7 @@ export function requireUser(req: Request): AuthUser {
   return user;
 }
 
-export async function requireApiKey(req: Request): Promise<ApiKey> {
+export async function requireApiKey(req: Request): Promise<Omit<ApiKey, "key_hash">> {
   const auth = req.headers.get("authorization");
   if (!auth?.startsWith("Bearer ")) {
     throw new HttpError(401, { error: "Include an API key in the Authorization header." });
@@ -136,15 +163,45 @@ export async function requireApiKey(req: Request): Promise<ApiKey> {
 // the API contract (Bearer JWT) and the UI share one auth mechanism.
 
 const SESSION_COOKIE = "waka_session";
-const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7d, matches the JWT expiry
-const secureFlag = process.env.NODE_ENV === "production" ? "; Secure" : "";
+const SESSION_MAX_AGE = 60 * 60; // 1h, matches the JWT expiry
+const secureFlag = process.env.NODE_ENV === "development" ? "" : "; Secure";
+const CSRF_COOKIE = "waka_csrf";
+const CSRF_MAX_AGE = SESSION_MAX_AGE;
 
 export function sessionCookie(token: string): string {
-  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax${secureFlag}; Max-Age=${SESSION_MAX_AGE}`;
+  return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Strict${secureFlag}; Max-Age=${SESSION_MAX_AGE}`;
 }
 
 export function clearSessionCookie(): string {
-  return `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax${secureFlag}; Max-Age=0`;
+  return `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Strict${secureFlag}; Max-Age=0`;
+}
+
+export function createCsrfToken(): string {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+export function csrfCookie(token: string): string {
+  return `${CSRF_COOKIE}=${token}; Path=/; SameSite=Strict${secureFlag}; Max-Age=${CSRF_MAX_AGE}`;
+}
+
+export function clearCsrfCookie(): string {
+  return `${CSRF_COOKIE}=; Path=/; SameSite=Strict${secureFlag}; Max-Age=0`;
+}
+
+export function getCsrfToken(req: Request): string | null {
+  const cookie = req.headers.get("cookie");
+  if (!cookie) return null;
+  const match = cookie.match(new RegExp(`(?:^|;\\s*)${CSRF_COOKIE}=([^;]+)`));
+  const token = match?.[1];
+  return token && /^[a-f0-9]{64}$/i.test(token) ? token : null;
+}
+
+export function isValidCsrfToken(req: Request, submitted: FormDataEntryValue | null): boolean {
+  const expected = getCsrfToken(req);
+  if (!expected || typeof submitted !== "string" || !/^[a-f0-9]{64}$/i.test(submitted)) {
+    return false;
+  }
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(submitted));
 }
 
 export function sessionUser(req: Request): AuthUser | null {
@@ -152,5 +209,9 @@ export function sessionUser(req: Request): AuthUser | null {
   if (!cookie) return null;
   const match = cookie.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
   if (!match) return null;
-  return verifyJWT(decodeURIComponent(match[1]));
+  try {
+    return verifyJWT(decodeURIComponent(match[1]));
+  } catch {
+    return null;
+  }
 }
