@@ -72,7 +72,7 @@ export async function createUser(
   const passwordHash = await hashPassword(password);
   const normalizedEmail = email.trim().toLowerCase();
 
-  const result = await query(
+  const result = await query<Omit<User, "password_hash">>(
     `INSERT INTO users (email, password_hash, name)
      VALUES ($1, $2, $3)
      RETURNING id, email, name, created_at, updated_at`,
@@ -93,75 +93,27 @@ export async function authenticateUser(
   email: string,
   password: string
 ): Promise<AuthUser | null> {
-  try {
-    const result = await query(
-      "SELECT id, email, name, password_hash FROM users WHERE email = $1 LIMIT 1",
-      [email.trim().toLowerCase()],
-    );
-    const user = result.rows[0] as
-      | { id: string; email: string; name?: string; password_hash: string }
-      | undefined;
-    const passwordHash = user?.password_hash ?? DUMMY_PASSWORD_HASH;
-    const isValid = await verifyPassword(password, passwordHash);
-    if (!isValid) {
-      return null;
-    }
-
-    if (!user) return null;
-
-    return {
-      id: user.id,
-      email: user.email,
-      name: user.name ?? undefined,
-    };
-  } catch {
+  const result = await query<{
+    id: string;
+    email: string;
+    name: string | null;
+    password_hash: string;
+  }>(
+    "SELECT id, email, name, password_hash FROM users WHERE email = $1 LIMIT 1",
+    [email.trim().toLowerCase()],
+  );
+  const user = result.rows[0];
+  const isValid = await verifyPassword(
+    password,
+    user?.password_hash ?? DUMMY_PASSWORD_HASH,
+  );
+  if (!isValid || !user) {
     return null;
   }
-}
 
-export async function getUserById(id: string): Promise<AuthUser | null> {
-  try {
-    const result = await query(
-      "SELECT id, email, name FROM users WHERE id = $1 LIMIT 1",
-      [id]
-    );
-
-    if (result.rows.length === 0) {
-      return null;
-    }
-
-    return result.rows[0];
-  } catch {
-    return null;
-  }
-}
-
-export async function initializeDefaultUser(): Promise<void> {
-  const adminEmail = process.env.ADMIN_EMAIL;
-  const adminPassword = process.env.ADMIN_PASSWORD;
-
-  if (!adminEmail || !adminPassword) {
-    console.warn(
-      "ADMIN_EMAIL and ADMIN_PASSWORD not set. Skipping default user creation."
-    );
-    return;
-  }
-
-  try {
-    // Check if user already exists
-    const result = await query(
-      "SELECT id FROM users WHERE email = $1 LIMIT 1",
-      [adminEmail]
-    );
-
-    if (result.rows.length > 0) {
-      console.log("Default admin user already exists");
-      return;
-    }
-
-    await createUser(adminEmail, adminPassword, "Admin");
-    console.log("Default admin user created successfully");
-  } catch (error) {
-    console.error("Failed to create default admin user:", error);
-  }
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name ?? undefined,
+  };
 }

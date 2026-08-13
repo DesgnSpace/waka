@@ -1,4 +1,11 @@
-import { Pool, PoolClient } from "pg";
+import {
+  Pool,
+  type PoolClient,
+  type QueryResult,
+  type QueryResultRow,
+} from "pg";
+
+export type DbRow<T extends object> = T & QueryResultRow;
 
 // Postgres TLS mode, configurable via DATABASE_SSL:
 //   unset | "false" | "disable"  -> no TLS (default; correct for a private
@@ -21,11 +28,20 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000, // Return an error after 5 seconds if connection could not be established
 });
 
-// Export the pool for direct access if needed
 export { pool as db };
 
-// Helper function for single queries
-export async function query(text: string, params?: unknown[]) {
+export function query(
+  text: string,
+  params?: unknown[],
+): Promise<QueryResult>;
+export function query<Row extends QueryResultRow>(
+  text: string,
+  params?: unknown[],
+): Promise<QueryResult<Row>>;
+export async function query(
+  text: string,
+  params?: unknown[],
+): Promise<QueryResult> {
   const client = await pool.connect();
   try {
     const result = await client.query(text, params);
@@ -35,7 +51,6 @@ export async function query(text: string, params?: unknown[]) {
   }
 }
 
-// Helper function for transactions
 export async function transaction<T>(
   callback: (client: PoolClient) => Promise<T>
 ): Promise<T> {
@@ -53,12 +68,11 @@ export async function transaction<T>(
   }
 }
 
-// Database types (kept from Supabase version)
 export interface User {
   id: string;
   email: string;
   password_hash: string;
-  name?: string;
+  name: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -68,10 +82,10 @@ export interface Domain {
   user_id: string;
   domain: string;
   status: "pending" | "verified" | "failed";
-  ses_identity_arn?: string;
-  verification_token?: string;
-  ses_configuration_set?: string;
-  do_domain_id?: string;
+  ses_identity_arn?: string | null;
+  verification_token?: string | null;
+  ses_configuration_set?: string | null;
+  do_domain_id?: string | null;
   mail_from_domain?: string | null;
   dns_records: unknown[];
   smtp_credentials?: {
@@ -79,7 +93,7 @@ export interface Domain {
     password: string;
     server: string;
     port: number;
-  };
+  } | null;
   created_at: string;
   updated_at: string;
 }
@@ -92,60 +106,7 @@ export interface ApiKey {
   key_hash: string;
   key_prefix: string;
   permissions: string[];
-  last_used_at?: string;
+  last_used_at?: string | null;
   created_at: string;
   updated_at: string;
-}
-
-export interface EmailLog {
-  id: string;
-  api_key_id?: string;
-  domain_id: string;
-  message_id?: string;
-  from_email: string;
-  to_emails: string[];
-  cc_emails: string[];
-  bcc_emails: string[];
-  subject?: string;
-  html_content?: string;
-  text_content?: string;
-  attachments: unknown[];
-  status:
-    | "pending"
-    | "sent"
-    | "failed"
-    | "delivered"
-    | "bounced"
-    | "complained";
-  ses_message_id?: string;
-  error_message?: string;
-  webhook_data?: unknown;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface WebhookEvent {
-  id: string;
-  email_log_id: string;
-  event_type: string;
-  event_data: unknown;
-  processed: boolean;
-  created_at: string;
-}
-
-// Test database connection
-export async function testConnection(): Promise<boolean> {
-  try {
-    const result = await query("SELECT NOW() as current_time");
-    console.log("Database connected successfully:", result.rows[0]);
-    return true;
-  } catch (error) {
-    console.error("Database connection failed:", error);
-    return false;
-  }
-}
-
-// Graceful shutdown
-export async function closeDatabase(): Promise<void> {
-  await pool.end();
 }
