@@ -94,7 +94,8 @@ function copyBtn(text: string, label = "Copy"): string {
 
 function formatDate(value: unknown): string {
   if (!value) return "—";
-  const d = new Date(value as string | number | Date);
+  if (typeof value !== "string" && typeof value !== "number" && !(value instanceof Date)) return "—";
+  const d = new Date(value);
   if (isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
@@ -827,8 +828,8 @@ export async function uiDomain(req: Req): Promise<Response> {
   if (!domain) {
     return renderPage(req, "Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user, { status: 404 });
   }
-  const body = detailHead(domain as DomainRow, "overview") +
-    domainOverview(domain as DomainRow & { dns_records?: DnsRecord[]; mail_from_domain?: string | null }, flashFrom(req));
+  const body = detailHead(domain, "overview") +
+    domainOverview(domain, flashFrom(req));
   return renderPage(req, domain.domain, body, user);
 }
 
@@ -846,8 +847,8 @@ export async function uiSetMailFrom(req: Req): Promise<Response> {
     const domain = await getDomainById(domainId, user.id);
     if (!domain) return seeOther("/dashboard");
     const msg = userError(err, "Could not save the return address. Check the domain and try again.");
-    const body = detailHead(domain as DomainRow, "overview") +
-      domainOverview(domain as DomainRow & { dns_records?: DnsRecord[]; mail_from_domain?: string | null }, alert("err", msg));
+    const body = detailHead(domain, "overview") +
+      domainOverview(domain, alert("err", msg));
     return renderPage(req, domain.domain, body, user, { status: 400 });
   }
   return seeOther(`/ui/domains/${domainId}?m=mailfrom-saved`);
@@ -860,7 +861,7 @@ export async function uiDomainDns(req: Req): Promise<Response> {
   if (!domain) {
     return new Response("This domain was not found. Return to the domains list and try again.", { status: 404 });
   }
-  const records: DnsRecord[] = Array.isArray(domain.dns_records) ? (domain.dns_records as DnsRecord[]) : [];
+  const records: DnsRecord[] = domain.dns_records;
   return new Response(zoneFile(domain.domain, records), {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
@@ -966,7 +967,7 @@ export async function uiDomainLogs(req: Req): Promise<Response> {
     <p class="lede">Messages sent from ${esc(domain.domain)} and the delivery updates we receive.</p>
     <p class="section-lede">Domain status: ${verifyStatusTag(domain.status)}</p>
     ${flashFrom(req)}
-    ${detailTabs(domain as DomainRow, "logs")}
+    ${detailTabs(domain, "logs")}
     <div class="table-wrap">${domainLogsView(logs)}</div>`;
   return renderPage(req, `${domain.domain} logs`, body, user);
 }
@@ -1079,7 +1080,7 @@ export async function uiDomainKeys(req: Req): Promise<Response> {
     console.error("load API keys failed:", err);
     return problemPage(req, "API keys", "We could not load your API keys. Refresh the page and try again.", user);
   }
-  return renderPage(req, `${domain.domain} keys`, keysBody(domain as DomainRow, keys, flashFrom(req)), user);
+  return renderPage(req, `${domain.domain} keys`, keysBody(domain, keys, flashFrom(req)), user);
 }
 
 export async function uiCreateDomainKey(req: Req): Promise<Response> {
@@ -1092,7 +1093,7 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
   const form = await csrfForm(req);
   if (!form) return forbidden();
   if (form.has("to")) {
-    return sendTestEmail(domain as DomainRow, String(form.get("to") ?? "").trim());
+    return sendTestEmail(domain, String(form.get("to") ?? "").trim());
   }
   const keyName = String(form.get("keyName") ?? "").trim().slice(0, 255);
   let banner = "";
@@ -1116,9 +1117,9 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
   } catch (err) {
     console.error("load API keys failed:", err);
     const message = "We could not reload the key list. Save the key above, then refresh the page.";
-    return renderPage(req, `${domain.domain} keys`, keysBody(domain as DomainRow, [], `${banner}${alert("err", message)}`), user, { status: 503 });
+    return renderPage(req, `${domain.domain} keys`, keysBody(domain, [], `${banner}${alert("err", message)}`), user, { status: 503 });
   }
-  return renderPage(req, `${domain.domain} keys`, keysBody(domain as DomainRow, keys, banner), user);
+  return renderPage(req, `${domain.domain} keys`, keysBody(domain, keys, banner), user);
 }
 
 export async function uiDeleteDomainKey(req: Req): Promise<Response> {
