@@ -83,7 +83,7 @@ export async function setup(): Promise<Response> {
 // ----------------------------------------------------------------------------
 
 const loginSchema = z.object({
-  email: z.string().email("Invalid email format").max(255),
+  email: z.string().email("Invalid email format").max(255).transform((email) => email.toLowerCase()),
   password: z.string().min(1, "Password is required").max(200).refine(
     (value) => Buffer.byteLength(value, "utf8") <= 72,
     "Password is too long",
@@ -104,7 +104,7 @@ export async function login(req: Req): Promise<Response> {
 }
 
 const signupSchema = z.object({
-  email: z.string().email("Invalid email format").max(255),
+  email: z.string().email("Invalid email format").max(255).transform((email) => email.toLowerCase()),
   password: z.string().min(12, "Password must be at least 12 characters").max(200).refine(
     (value) => Buffer.byteLength(value, "utf8") <= 72,
     "Password is too long",
