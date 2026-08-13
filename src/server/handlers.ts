@@ -121,22 +121,22 @@ export async function signup(req: Req): Promise<Response> {
     throw new HttpError(429, { error: "Too many sign-up attempts. Try again later." });
   }
 
-  let created: Awaited<ReturnType<typeof createUser>>;
+  const signupResponse = () =>
+    json({ success: true, message: "If the email can be used, sign in to continue." }, 202);
   try {
-    created = await createUser(email, password, name);
+    await createUser(email, password, name);
   } catch (error) {
     const code =
       typeof error === "object" && error !== null && "code" in error
         ? error.code
         : undefined;
     if (code === "23505") {
-      return json({ error: "An account with that email may already exist." }, 409);
+      return signupResponse();
     }
     throw error;
   }
 
-  const user = { id: created.id, email: created.email, name: created.name ?? undefined };
-  return json({ success: true, data: { user, token: generateJWT(user) } }, 201);
+  return signupResponse();
 }
 
 export function me(req: Req): Response {

@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/bun";
+import crypto from "crypto";
 import { z, ZodError } from "zod";
 import { verifyJWT, type AuthUser } from "@/lib/auth";
 import { verifyApiKey } from "@/lib/api-keys";
@@ -164,6 +165,8 @@ export async function requireApiKey(req: Request): Promise<Omit<ApiKey, "key_has
 const SESSION_COOKIE = "waka_session";
 const SESSION_MAX_AGE = 60 * 60; // 1h, matches the JWT expiry
 const secureFlag = process.env.NODE_ENV === "development" ? "" : "; Secure";
+const CSRF_COOKIE = "waka_csrf";
+const CSRF_MAX_AGE = SESSION_MAX_AGE;
 
 export function sessionCookie(token: string): string {
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Strict${secureFlag}; Max-Age=${SESSION_MAX_AGE}`;
@@ -171,6 +174,34 @@ export function sessionCookie(token: string): string {
 
 export function clearSessionCookie(): string {
   return `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Strict${secureFlag}; Max-Age=0`;
+}
+
+export function createCsrfToken(): string {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+export function csrfCookie(token: string): string {
+  return `${CSRF_COOKIE}=${token}; Path=/; SameSite=Strict${secureFlag}; Max-Age=${CSRF_MAX_AGE}`;
+}
+
+export function clearCsrfCookie(): string {
+  return `${CSRF_COOKIE}=; Path=/; SameSite=Strict${secureFlag}; Max-Age=0`;
+}
+
+export function getCsrfToken(req: Request): string | null {
+  const cookie = req.headers.get("cookie");
+  if (!cookie) return null;
+  const match = cookie.match(new RegExp(`(?:^|;\\s*)${CSRF_COOKIE}=([^;]+)`));
+  const token = match?.[1];
+  return token && /^[a-f0-9]{64}$/i.test(token) ? token : null;
+}
+
+export function isValidCsrfToken(req: Request, submitted: FormDataEntryValue | null): boolean {
+  const expected = getCsrfToken(req);
+  if (!expected || typeof submitted !== "string" || !/^[a-f0-9]{64}$/i.test(submitted)) {
+    return false;
+  }
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(submitted));
 }
 
 export function sessionUser(req: Request): AuthUser | null {
