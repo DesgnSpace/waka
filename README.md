@@ -1,367 +1,67 @@
-# Waka
+# FreeResend
 
-**A self-hosted, open-source alternative to Resend for sending transactional emails.**
+FreeResend is a self-hosted, Resend-compatible transactional email API. It runs a Bun + TypeScript server, stores data in PostgreSQL, and sends mail through Amazon SES.
 
-Waka allows you to host your own email service using Amazon SES and optionally Digital Ocean for DNS management. It provides a Resend-compatible API so you can use it as a drop-in replacement.
+It is for developers who want to run their own email API and pay AWS SES usage costs instead of a hosted email API subscription. You need an AWS account with SES access, a PostgreSQL database, and a machine that can run Docker. AWS, database, domain, and DNS costs are separate; FreeResend has no service fee.
 
-> **Acknowledgement:** Waka was originally created by [Emad Ibrahim](https://github.com/eibrahim). This fork continues the project's mission of providing affordable, self-hosted email infrastructure. Thank you to all the [original contributors](https://github.com/eibrahim/waka/graphs/contributors).
+## Quick start
 
-## Features
-
-- **100% Resend-compatible** - True drop-in replacement using environment variables
-- **Self-hosted** - Full control over your email infrastructure
-- **Amazon SES integration** - Reliable email delivery with DKIM support
-- **Automatic DNS setup** - Integration with Digital Ocean for DNS record creation
-- **DKIM authentication** - Automatic DKIM key generation and DNS record creation
-- **API key management** - Generate and manage multiple API keys per domain
-- **Email logging** - Track all sent emails with delivery status and logs
-- **Domain verification** - Automated domain verification with SES
-- **Secure** - JWT-based authentication and robust API key validation
-- **Docker ready** - Containerized deployment with Docker Compose
-- **Comprehensive logging** - Detailed email logs with webhook support
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js 18+
-- PostgreSQL database (local or hosted)
-- Amazon AWS account with SES access
-- Digital Ocean account (optional, for automatic DNS management)
-
-### Installation
-
-1. **Clone and install dependencies:**
+The shortest local path uses Docker Compose. It starts PostgreSQL, runs the migration, and starts the API.
 
 ```bash
-git clone <your-repo>
-cd waka
-npm install
+git clone https://github.com/DesgnSpace/waka.git freeresend
+cd freeresend
+cp .env.example .env
 ```
 
-2. **Set up environment variables:**
+Edit `.env` and replace the placeholder values. Then run:
 
 ```bash
-cp .env.local.example .env.local
+docker compose up --build -d
+curl http://localhost:3000/api/health
+curl -X POST http://localhost:3000/api/setup
 ```
 
-Edit `.env.local` with your configuration:
+Open `http://localhost:3000` and sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. The full ordered setup, including PostgreSQL, is in [SETUP.md](SETUP.md). Use [DEPLOYMENT.md](DEPLOYMENT.md) for production Docker Compose deployment.
 
-```env
-# Next.js Configuration
-NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=your-super-secret-jwt-key-here
+## What happens next
 
-# Database Configuration (PostgreSQL)
-DATABASE_URL=postgresql://username:password@hostname:port/database
+1. Add a sending domain in the dashboard.
+2. Add the DNS records shown by FreeResend at your DNS provider.
+3. Wait for DNS changes, then verify the domain.
+4. Create an API key for the verified domain.
+5. Send mail through `POST /api/emails` or a Resend client pointed at `https://your-host.example/api`.
 
-# AWS SES Configuration
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=your-aws-access-key
-AWS_SECRET_ACCESS_KEY=your-aws-secret-key
+FreeResend does not create DNS records automatically. It shows the SES verification, DKIM, SPF, DMARC, and optional custom MAIL FROM records that you must add yourself.
 
-# Digital Ocean API Configuration (optional)
-DO_API_TOKEN=your-digitalocean-api-token
+## Documentation
 
-# Application Configuration
-ADMIN_EMAIL=admin@yourdomain.com
-ADMIN_PASSWORD=your-secure-admin-password
+- [SETUP.md](SETUP.md): local setup, environment variables, SES, and the first email
+- [DEPLOYMENT.md](DEPLOYMENT.md): Docker Compose production deployment
+- [CONTRIBUTING.md](CONTRIBUTING.md): development and pull request rules
+- [PRODUCT.md](PRODUCT.md): product scope and supported behavior
+- [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md): current architecture and routes
 
-# Error telemetry (optional) — set a Sentry DSN to enable, leave unset to disable
-SENTRY_DSN=
-```
+## API examples
 
-3. **Set up the database:**
-
-No manual step. Migrations in `migrations/` run automatically when the server starts — tables are created (and future schema changes applied) on boot. Applied migrations are tracked in the `schema_migrations` table.
-
-4. **Start the development server:**
+Create a domain and API key in the dashboard first. Then send an email with the key:
 
 ```bash
-npm run dev
+curl -X POST https://your-host.example/api/emails \
+  -H "Authorization: Bearer wka_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "hello@example.com",
+    "to": ["recipient@example.com"],
+    "subject": "Hello",
+    "html": "<p>Hello from FreeResend.</p>"
+  }'
 ```
 
-Visit `http://localhost:3000` and log in with your admin credentials.
+The Resend Node.js SDK can use the same API key when its base URL is set to `https://your-host.example/api`.
 
-## AWS SES Setup
-
-1. **Verify your AWS account for SES:**
-
-   - Go to AWS SES console
-   - Move out of sandbox mode if needed
-
-- Configure sending limits
-
-2. **Create IAM user with SES permissions:**
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ses:SendEmail",
-        "ses:SendRawEmail",
-        "ses:VerifyDomainIdentity",
-        "ses:GetIdentityVerificationAttributes",
-        "ses:DeleteIdentity",
-        "ses:CreateConfigurationSet",
-        "ses:VerifyDomainDkim",
-        "ses:GetIdentityDkimAttributes"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-> **Note**: The DKIM permissions (`ses:VerifyDomainDkim`, `ses:GetIdentityDkimAttributes`) are required for automatic DKIM setup.
-
-## Digital Ocean DNS Setup (Optional)
-
-If you want automatic DNS record creation:
-
-1. Create a Digital Ocean API token with read/write access
-2. Add your domains to Digital Ocean's DNS management
-3. Set the `DO_API_TOKEN` environment variable
-
-## Using Waka with Resend SDK
-
-Waka is **100% compatible** with the [Resend Node.js SDK](https://github.com/resend/resend-node)!
-
-### Method 1: Environment Variable (Recommended)
-
-Set the `RESEND_BASE_URL` environment variable:
-
-```bash
-export RESEND_BASE_URL="https://your-waka-domain.com/api"
-```
-
-Then use Resend exactly as before:
-
-```javascript
-import { Resend } from "resend";
-
-// No changes needed - Waka API key works with Resend SDK!
-const resend = new Resend("your-waka-api-key");
-
-const { data, error } = await resend.emails.send({
-  from: "onboarding@yourdomain.com",
-  to: ["user@example.com"],
-  subject: "Hello World",
-  html: "<strong>it works!</strong>",
-});
-```
-
-### Method 2: Direct API
-
-```javascript
-const response = await fetch("https://your-waka-domain.com/api/emails", {
-  method: "POST",
-  headers: {
-    Authorization: "Bearer your-waka-api-key",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    from: "onboarding@yourdomain.com",
-    to: ["user@example.com"],
-    subject: "Hello World",
-    html: "<strong>it works!</strong>",
-  }),
-});
-```
-
-## API Endpoints
-
-### Authentication
-
-- `POST /api/auth/login` - Login with email/password
-- `GET /api/auth/me` - Get current user info
-
-### Domains
-
-- `GET /api/domains` - List all domains
-- `POST /api/domains` - Add new domain
-- `DELETE /api/domains/{id}` - Delete domain
-- `POST /api/domains/{id}/verify` - Check domain verification
-
-### API Keys
-
-- `GET /api/api-keys` - List API keys
-- `POST /api/api-keys` - Create new API key
-- `DELETE /api/api-keys/{id}` - Delete API key
-
-### Emails (Resend-compatible)
-
-- `POST /api/emails` - Send email
-- `GET /api/emails/logs` - Get email logs
-- `GET /api/emails/{id}` - Get specific email
-
-### Webhooks
-
-- `POST /api/webhooks/ses` - SES webhook endpoint
-
-## Domain Setup Process
-
-1. **Add domain** in the Waka dashboard
-2. **DNS Records** will be automatically created (if Digital Ocean is configured) or displayed for manual setup:
-
-   - **TXT record** - `_amazonses.yourdomain.com` for SES domain verification
-   - **MX record** - `yourdomain.com` for receiving emails via SES
-   - **SPF record** - `yourdomain.com` for sender policy framework
-   - **DMARC record** - `_dmarc.yourdomain.com` for email authentication policy
-   - **DKIM records** - 3 CNAME records for `*._domainkey.yourdomain.com` for email signing
-
-3. **Verify domain** - Click "Check Verification" once DNS records are live
-4. **Create API key** - Generate API keys for your verified domain
-5. **Start sending** - Use the API key with Waka or Resend SDK
-
-## Testing Your Setup
-
-### Tests
-
-```bash
-npm test
-```
-
-## Troubleshooting
-
-### Common Issues
-
-**Q: Getting "Invalid API key" errors**
-
-- Make sure you copied the **complete API key** from the green success message (not the masked version from the table)
-- API keys have format: `wka_keyId_secretPart` (3 parts separated by underscores)
-
-**Q: Digital Ocean DNS automation not working**
-
-- Verify your DO API token has **Read & Write** access to **Domains** and **Domain Records**
-- Ensure your domain is added to Digital Ocean's DNS management
-- Test token: `curl -H "Authorization: Bearer YOUR_TOKEN" https://api.digitalocean.com/v2/domains`
-
-**Q: Domain verification stuck at "pending"**
-
-- DNS propagation takes 5-30 minutes - be patient!
-- Check DNS records: `dig TXT _amazonses.yourdomain.com`
-- Ensure all DNS records are created properly
-
-**Q: AWS SES permissions error**
-
-- Make sure your IAM policy includes **DKIM permissions**: `ses:VerifyDomainDkim` and `ses:GetIdentityDkimAttributes`
-- Verify your AWS account is out of SES sandbox mode
-
-**Q: Resend SDK not working with Waka**
-
-- Set environment variable: `export RESEND_BASE_URL="https://your-domain.com/api"`
-- Use Waka API key (starts with `wka_`), not Resend API key
-
-## Production Deployment
-
-### Docker (Recommended)
-
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-EXPOSE 3000
-CMD ["npm", "start"]
-```
-
-### Environment Setup
-
-- Use a production database (Supabase Pro or self-hosted PostgreSQL)
-- Set up proper SSL certificates
-- Configure firewall rules
-- Set up monitoring and logging
-- Configure SES with proper sending limits
-
-### Vercel Deployment
-
-Waka can be deployed on Vercel with some configuration:
-
-1. Connect your GitHub repo to Vercel
-2. Set environment variables in Vercel dashboard
-3. Deploy
-
-Note: Webhook endpoints might need special configuration for Vercel's serverless environment.
-
-## Development
-
-```bash
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Start production server
-npm start
-
-# Lint code
-npm run lint
-```
-
-## Contributing
-
-We welcome contributions! Here's how to get started:
-
-### Development Setup
-
-1. **Fork the repository** on GitHub
-2. **Clone your fork**: `git clone <your-repo-url>`
-3. **Install dependencies**: `npm install`
-4. **Set up environment** following the Quick Start guide above
-5. **Run tests**: `npm test`
-6. **Start development**: `npm run dev`
-
-### Contributing Guidelines
-
-- **Bug fixes** - Always welcome with test cases
-- **New features** - Open an issue first to discuss
-- **Documentation** - Improvements always appreciated
-- **Tests** - Required for new features
-- **Code style** - Follow existing patterns
-
-### Pull Request Process
-
-1. Create a feature branch: `git checkout -b feature/your-feature-name`
-2. Make your changes with clear, descriptive commits
-3. Add tests for new functionality
-4. Update documentation if needed
-5. Submit a pull request with a clear description
-
-### Reporting Issues
-
-When reporting bugs, please include:
-
-- Your environment (Node.js version, OS, etc.)
-- Steps to reproduce the issue
-- Expected vs actual behavior
-- Relevant error messages or logs
+The complete route list is in [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md).
 
 ## License
 
-MIT License - see LICENSE file for details.
-
-## Support
-
-- **Issues**: Report bugs via [GitHub Issues](https://github.com/eibrahim/waka/issues)
-
-## Roadmap
-
-- [ ] Email templates support
-- [ ] Webhook retry mechanism
-- [ ] Email analytics dashboard
-- [ ] Multi-user support
-- [ ] Email scheduling
-- [ ] SMTP server support
-- [ ] Email campaign management
-
----
+MIT. See [LICENSE](LICENSE).

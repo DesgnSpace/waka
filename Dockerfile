@@ -1,14 +1,13 @@
-# Bun-native API server (replaces the Next.js runtime). No build step — Bun runs
-# server.ts directly. Reuses src/lib + src/server; src/app (the old Next UI) is
-# unused here and will be rebuilt as HTMX later.
+# Bun-native API server. Bun runs server.ts directly, so this image needs no build
+# step.
 
-FROM oven/bun:1.3-alpine AS deps
+FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun install --frozen-lockfile --production
 
-FROM oven/bun:1.3-alpine AS runner
+FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000
