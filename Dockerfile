@@ -1,13 +1,13 @@
 # Bun-native API server. Bun runs server.ts directly, so this image needs no build
 # step.
 
-FROM oven/bun:1.3 AS deps
+FROM oven/bun:1.3-alpine AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun install --frozen-lockfile --production
 
-FROM oven/bun:1.3 AS runner
+FROM oven/bun:1.3-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000
