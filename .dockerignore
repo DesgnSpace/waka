@@ -40,9 +40,6 @@ coverage
 Dockerfile
 .dockerignore
 
-# Kubernetes
-k8s/
-
 # CI / tooling / agent dirs
 .github
 .kiro

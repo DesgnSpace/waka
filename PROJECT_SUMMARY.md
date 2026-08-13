@@ -36,7 +36,7 @@ Dashboard routes include `/`, `/login`, `/logout`, `/dashboard`, and domain and 
 
 ## Database
 
-The source of truth is `migrations/001_baseline.sql`. It creates `users`, `domains`, `api_keys`, `email_logs`, `email_events`, and `webhook_events`, plus indexes and timestamp triggers. The application migration runs at startup for both Compose and Kubernetes deployments.
+The source of truth is `migrations/001_baseline.sql`. It creates `users`, `domains`, `api_keys`, `email_logs`, `email_events`, and `webhook_events`, plus indexes and timestamp triggers. The application migration runs at startup for Docker Compose deployments.
 
 ## Configuration
 

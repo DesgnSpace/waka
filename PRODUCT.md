@@ -6,7 +6,7 @@ FreeResend is a self-hosted, Resend-compatible transactional email API. It uses 
 
 ## Users
 
-Developers who can run Docker or Kubernetes, manage PostgreSQL, configure AWS SES, and edit DNS records. They want control of their email infrastructure and AWS-based usage costs instead of a hosted email API subscription.
+Developers who can run Docker, manage PostgreSQL, configure AWS SES, and edit DNS records. They want control of their email infrastructure and AWS-based usage costs instead of a hosted email API subscription.
 
 ## Supported behavior
 
@@ -17,7 +17,7 @@ Developers who can run Docker or Kubernetes, manage PostgreSQL, configure AWS SE
 - Per-domain API keys with send permissions.
 - Resend-compatible email sending, including HTML, text, attachments, reply-to addresses, and tags.
 - Email logs and signed SNS/SES delivery, bounce, complaint, open, and click events.
-- Docker Compose and Kubernetes deployment files.
+- Docker Compose deployment files.
 
 ## Limits and dependencies
 

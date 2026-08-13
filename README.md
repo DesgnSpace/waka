@@ -2,7 +2,7 @@
 
 FreeResend is a self-hosted, Resend-compatible transactional email API. It runs a Bun + TypeScript server, stores data in PostgreSQL, and sends mail through Amazon SES.
 
-It is for developers who want to run their own email API and pay AWS SES usage costs instead of a hosted email API subscription. You need an AWS account with SES access, a PostgreSQL database, and a machine or cluster that can run Docker. AWS, database, domain, and DNS costs are separate; FreeResend has no service fee.
+It is for developers who want to run their own email API and pay AWS SES usage costs instead of a hosted email API subscription. You need an AWS account with SES access, a PostgreSQL database, and a machine that can run Docker. AWS, database, domain, and DNS costs are separate; FreeResend has no service fee.
 
 ## Quick start
 
@@ -22,7 +22,7 @@ curl http://localhost:3000/api/health
 curl -X POST http://localhost:3000/api/setup
 ```
 
-Open `http://localhost:3000` and sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. The full ordered setup, including PostgreSQL, is in [SETUP.md](SETUP.md). Use [DEPLOYMENT.md](DEPLOYMENT.md) for production Docker Compose or Kubernetes deployment.
+Open `http://localhost:3000` and sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. The full ordered setup, including PostgreSQL, is in [SETUP.md](SETUP.md). Use [DEPLOYMENT.md](DEPLOYMENT.md) for production Docker Compose deployment.
 
 ## What happens next
 
@@ -37,7 +37,7 @@ FreeResend does not create DNS records automatically. It shows the SES verificat
 ## Documentation
 
 - [SETUP.md](SETUP.md): local setup, environment variables, SES, and the first email
-- [DEPLOYMENT.md](DEPLOYMENT.md): Docker Compose and Kubernetes production deployment
+- [DEPLOYMENT.md](DEPLOYMENT.md): Docker Compose production deployment
 - [CONTRIBUTING.md](CONTRIBUTING.md): development and pull request rules
 - [PRODUCT.md](PRODUCT.md): product scope and supported behavior
 - [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md): current architecture and routes
