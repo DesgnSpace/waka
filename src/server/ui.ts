@@ -880,6 +880,7 @@ function zoneFile(domain: string, records: DnsRecord[]): string {
     `;`,
   ];
   for (const r of records) {
+    if (r.description) lines.push(`; ${r.description}`);
     const name = fqdn(r.name);
     const ttl = r.ttl ?? 300;
     const type = r.type.toUpperCase();
