@@ -1,21 +1,7 @@
 import { json, jsonBody, type Req } from "./http";
-import { query } from "@/lib/database";
+import { transaction } from "@/lib/database";
 import { validateSnsMessage, confirmSubscription, type SnsMessage } from "@/lib/sns";
 import { z } from "zod";
-
-interface SESMessage {
-  // Config-set events use PascalCase `eventType` ("Delivery"); identity
-  // notifications use `notificationType`. Normalized to lower-case below.
-  eventType?: string;
-  notificationType?: string;
-  mail: { messageId: string; timestamp: string; source: string; destination: string[] };
-  bounce?: {
-    bouncedRecipients: Array<{ emailAddress: string; diagnosticCode: string }>;
-  };
-  complaint?: { complainedRecipients: Array<{ emailAddress: string }> };
-  open?: { timestamp?: string; ipAddress?: string; userAgent?: string };
-  click?: { timestamp?: string; ipAddress?: string; userAgent?: string; link?: string };
-}
 
 const sesMessageSchema = z.object({
   eventType: z.string().optional(),
@@ -34,6 +20,8 @@ const sesMessageSchema = z.object({
   click: z.object({ timestamp: z.string().optional(), ipAddress: z.string().optional(), userAgent: z.string().optional(), link: z.string().optional() }).optional(),
 }).refine((message) => Boolean(message.eventType || message.notificationType), "Missing SES event type");
 
+type SESMessage = z.infer<typeof sesMessageSchema>;
+
 const snsMessageSchema = z.object({
   Type: z.enum(["Notification", "SubscriptionConfirmation", "UnsubscribeConfirmation"]),
   MessageId: z.string().min(1),
@@ -51,8 +39,14 @@ const snsMessageSchema = z.object({
 });
 
 async function processSESEvent(message: SESMessage): Promise<void> {
-  try {
-    const emailResult = await query(
+  const eventType = (message.eventType ?? message.notificationType ?? "").toLowerCase();
+  const eventData = JSON.stringify(message);
+
+  await transaction(async (client) => {
+    const emailResult = await client.query<{
+      id: string;
+      status: string;
+    }>(
       `SELECT el.id, el.domain_id, el.status
        FROM email_logs el
        JOIN domains d ON d.id = el.domain_id
@@ -66,20 +60,19 @@ async function processSESEvent(message: SESMessage): Promise<void> {
     }
 
     const emailLog = emailResult.rows[0];
-    const eventType = (message.eventType ?? message.notificationType ?? "").toLowerCase();
 
     // Engagement events fire once PER open/click — record every one in
     // email_events (counts are derived on read); never overwrite delivery status.
     if (eventType === "open" || eventType === "click") {
       const isClick = eventType === "click";
       const ev = isClick ? message.click : message.open;
-      await query(
+      await client.query(
         "INSERT INTO email_events (email_log_id, type, link, ip_address, user_agent) VALUES ($1, $2, $3, $4, $5)",
         [emailLog.id, eventType, isClick ? message.click?.link ?? null : null, ev?.ipAddress ?? null, ev?.userAgent ?? null]
       );
-      await query(
+      await client.query(
         "INSERT INTO webhook_events (email_log_id, event_type, event_data, processed) VALUES ($1, $2, $3, $4)",
-        [emailLog.id, eventType, JSON.stringify(message), true]
+        [emailLog.id, eventType, eventData, true]
       );
       return;
     }
@@ -110,25 +103,15 @@ async function processSESEvent(message: SESMessage): Promise<void> {
         break;
     }
 
-    await query(
+    await client.query(
       "UPDATE email_logs SET status = $1, error_message = $2, webhook_data = $3 WHERE id = $4",
-      [newStatus, errorMessage, JSON.stringify(message), emailLog.id]
+      [newStatus, errorMessage, eventData, emailLog.id]
     );
-    await query(
+    await client.query(
       "INSERT INTO webhook_events (email_log_id, event_type, event_data, processed) VALUES ($1, $2, $3, $4)",
-      [emailLog.id, eventType, JSON.stringify(message), true]
+      [emailLog.id, eventType, eventData, true]
     );
-  } catch (error) {
-    console.error("Failed to process SES event:", error);
-    try {
-      await query(
-        "INSERT INTO webhook_events (email_log_id, event_type, event_data, processed) VALUES ($1, $2, $3, $4)",
-        [null, message.eventType ?? message.notificationType ?? null, JSON.stringify(message), false]
-      );
-    } catch (insertError) {
-      console.error("Failed to create webhook event record:", insertError);
-    }
-  }
+  });
 }
 
 export async function snsWebhook(req: Req): Promise<Response> {

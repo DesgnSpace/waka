@@ -1,7 +1,9 @@
 import { customAlphabet } from "nanoid";
 import bcrypt from "bcryptjs";
 import { query } from "./database";
-import type { ApiKey } from "./database";
+import type { ApiKey, DbRow } from "./database";
+import { errorMessage } from "./errors";
+import { parseStringArray } from "./serialization";
 
 export type PublicApiKey = Omit<ApiKey, "key_hash">;
 
@@ -14,22 +16,28 @@ export interface ApiKeyWithKey extends Omit<ApiKey, "key_hash"> {
   key: string;
 }
 
-// Helper function to safely parse permissions (handles both string and array)
-function safeParsePermissions(permissions: unknown): string[] {
-  if (!permissions) return ["send"];
-  if (typeof permissions === "string") {
-    try {
-      permissions = JSON.parse(permissions);
-    } catch {
-      return ["send"];
-    }
-  }
-  if (Array.isArray(permissions)) {
-    return permissions.filter(
-      (permission): permission is string => typeof permission === "string",
-    );
-  }
-  return ["send"];
+type ApiKeyPublicRow = DbRow<
+  Omit<ApiKey, "key_hash" | "permissions"> & { permissions: unknown }
+>;
+type ApiKeyVerificationRow = ApiKeyPublicRow & { key_hash: string };
+type ApiKeyWithDomainRow = ApiKeyPublicRow & { domain_name: string | null };
+
+function parsePermissions(value: unknown): string[] {
+  return value == null ? ["send"] : parseStringArray(value, "permissions");
+}
+
+function publicApiKey(row: ApiKeyPublicRow): PublicApiKey {
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    domain_id: row.domain_id,
+    key_name: row.key_name,
+    key_prefix: row.key_prefix,
+    permissions: parsePermissions(row.permissions),
+    last_used_at: row.last_used_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
 }
 
 export async function generateApiKey(
@@ -50,7 +58,7 @@ export async function generateApiKey(
   const keyHash = await bcrypt.hash(apiKey, 10);
 
   try {
-    const result = await query(
+    const result = await query<ApiKeyPublicRow>(
       `INSERT INTO api_keys (user_id, domain_id, key_name, key_hash, key_prefix, permissions)
        SELECT $1, d.id, $3, $4, $5, $6
        FROM domains d
@@ -71,13 +79,11 @@ export async function generateApiKey(
       throw new Error("Domain not found or you don't have access.");
     }
     return {
-      ...data,
-      permissions: safeParsePermissions(data.permissions),
+      ...publicApiKey(data),
       key: apiKey,
     };
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Couldn't create API key: ${errorMessage}`);
+    throw new Error(`Couldn't create API key: ${errorMessage(error)}`);
   }
 }
 
@@ -103,49 +109,34 @@ export async function verifyApiKey(
 
   const prefix = `${prefix_part}_${keyId_part}`;
 
-  try {
-    const result = await query(
-      `SELECT ak.id, ak.user_id, ak.domain_id, ak.key_name, ak.key_hash,
-              ak.key_prefix, ak.permissions, ak.last_used_at, ak.created_at, ak.updated_at
-       FROM api_keys ak
-       JOIN domains d ON d.id = ak.domain_id AND d.user_id = ak.user_id
-       WHERE ak.key_prefix = $1`,
-      [prefix],
-    );
+  const result = await query<ApiKeyVerificationRow>(
+    `SELECT ak.id, ak.user_id, ak.domain_id, ak.key_name, ak.key_hash,
+            ak.key_prefix, ak.permissions, ak.last_used_at, ak.created_at, ak.updated_at
+     FROM api_keys ak
+     JOIN domains d ON d.id = ak.domain_id AND d.user_id = ak.user_id
+     WHERE ak.key_prefix = $1`,
+    [prefix],
+  );
 
-    if (result.rows.length === 0) {
-      return null;
+  for (const key of result.rows) {
+    const isValid = await bcrypt.compare(apiKey, key.key_hash);
+    if (isValid) {
+      await query(
+        "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1 AND user_id = $2",
+        [key.id, key.user_id],
+      );
+      return publicApiKey(key);
     }
-
-    // Verify the full key against each possible match
-    for (const key of result.rows) {
-      const isValid = await bcrypt.compare(apiKey, key.key_hash);
-      if (isValid) {
-        // Update last used timestamp
-        await query(
-          "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1 AND user_id = $2",
-          [key.id, key.user_id],
-        );
-
-        // Parse JSON fields
-        const { key_hash: _keyHash, ...safeKey } = key;
-        return {
-          ...safeKey,
-          permissions: safeParsePermissions(key.permissions),
-        };
-      }
-    }
-
-    return null;
-  } catch (error) {
-    console.error("API key verification error:", error);
-    return null;
   }
+
+  return null;
 }
 
-export async function getUserApiKeys(userId: string): Promise<PublicApiKey[]> {
+export async function getUserApiKeys(
+  userId: string,
+): Promise<Array<PublicApiKey & { domains: { domain: string } | null }>> {
   try {
-    const result = await query(
+    const result = await query<ApiKeyWithDomainRow>(
       `SELECT 
         ak.id, ak.user_id, ak.domain_id, ak.key_name, ak.key_prefix,
         ak.permissions, ak.last_used_at, ak.created_at, ak.updated_at,
@@ -158,13 +149,11 @@ export async function getUserApiKeys(userId: string): Promise<PublicApiKey[]> {
     );
 
     return result.rows.map((row) => ({
-      ...row,
-      permissions: safeParsePermissions(row.permissions),
+      ...publicApiKey(row),
       domains: row.domain_name ? { domain: row.domain_name } : null,
     }));
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Couldn't fetch API keys: ${errorMessage}`);
+    throw new Error(`Couldn't fetch API keys: ${errorMessage(error)}`);
   }
 }
 
@@ -173,7 +162,7 @@ export async function getDomainApiKeys(
   userId: string,
 ): Promise<PublicApiKey[]> {
   try {
-    const result = await query(
+    const result = await query<ApiKeyPublicRow>(
       `SELECT ak.id, ak.user_id, ak.domain_id, ak.key_name, ak.key_prefix,
               ak.permissions, ak.last_used_at, ak.created_at, ak.updated_at
        FROM api_keys ak
@@ -183,13 +172,9 @@ export async function getDomainApiKeys(
       [domainId, userId]
     );
 
-    return result.rows.map((row) => ({
-      ...row,
-      permissions: safeParsePermissions(row.permissions),
-    }));
+    return result.rows.map(publicApiKey);
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Couldn't fetch domain API keys: ${errorMessage}`);
+    throw new Error(`Couldn't fetch domain API keys: ${errorMessage(error)}`);
   }
 }
 
@@ -207,8 +192,7 @@ export async function deleteApiKey(
       throw new Error("API key not found or you don't have access.");
     }
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Couldn't delete API key: ${errorMessage}`);
+    throw new Error(`Couldn't delete API key: ${errorMessage(error)}`);
   }
 }
 
@@ -227,14 +211,6 @@ export async function updateApiKeyPermissions(
       throw new Error("API key not found or you don't have access.");
     }
   } catch (error: unknown) {
-    const errorObj = error as { message?: string };
-    throw new Error(`Couldn't update API key permissions: ${errorObj.message}`);
+    throw new Error(`Couldn't update API key permissions: ${errorMessage(error)}`);
   }
-}
-
-export function maskApiKey(apiKey: string): string {
-  const parts = apiKey.split("_");
-  if (parts.length !== 3) return "wka_...";
-
-  return `${parts[0]}_${parts[1]}_${"*".repeat(parts[2].length)}`;
 }
