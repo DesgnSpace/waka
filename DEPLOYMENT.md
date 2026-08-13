@@ -1,187 +1,111 @@
-# Waka Deployment Guide
+# Deployment
 
-## Quick Deploy to Vercel
+Waka is a long-running Bun HTTP server. Docker Compose is the supported deployment path. The project does not support the old Vercel, Next.js, or Node.js deployment instructions that were previously in this file.
 
-### Prerequisites
-- Vercel account
-- GitHub repository (recommended)
-- PostgreSQL database (managed service recommended)
-- AWS SES account configured
-- Domain name (optional)
+Read [SETUP.md](SETUP.md) for the environment variable table, SES permissions, SES sandbox, DNS, and webhook setup. This file only covers deployment.
 
-### 1. Database Setup
+## Production with Docker Compose
 
-**Recommended Services:**
-- **Railway**: [railway.app](https://railway.app) - $5/month
-- **Supabase**: [supabase.com](https://supabase.com) - Free tier available
-- **PlanetScale**: [planetscale.com](https://planetscale.com) - Free tier available
-- **Neon**: [neon.tech](https://neon.tech) - Free tier available
+`docker-compose.yml` starts a PostgreSQL 16 container and the Waka API. The API runs migrations before it accepts requests.
 
-**Database Schema:**
+1. Create the environment file:
 
-Applied automatically: the server runs migrations from `migrations/` at startup, creating all tables and indexes.
+   ```bash
+   cp .env.example .env
+   ```
 
-### 2. Environment Variables
+2. Set real values in `.env`, including `NEXTAUTH_SECRET`, both admin values, and the three AWS values.
 
-Set these in Vercel Dashboard or using Vercel CLI:
+3. Start the stack:
+
+   ```bash
+   docker compose up --build -d
+   ```
+
+4. Check the API:
+
+   ```bash
+   curl http://localhost:3000/api/health
+   docker compose ps
+   ```
+
+For production:
+
+- Publish port `3000` through an HTTPS reverse proxy or load balancer.
+- Use a strong `NEXTAUTH_SECRET` and a strong PostgreSQL password.
+- Use `NODE_ENV=production` so the dashboard cookie is marked `Secure`.
+- Set `DATABASE_SSL=require` when the database endpoint requires verified TLS.
+- Store `.env` outside source control. `.env` is ignored and is not copied into the image.
+- Replace the local PostgreSQL service with a managed PostgreSQL service when you need backups and high availability; set `DATABASE_URL` to that service.
+- Set `DOMAIN` or `CORS_ORIGIN` only when browser clients need cross-origin access.
+- Configure the SES SNS webhook with the public HTTPS URL described in [SETUP.md](SETUP.md).
+
+Stop the stack with `docker compose down`. Add `-v` only when you intend to delete the local PostgreSQL data volume.
+
+## Updates and operations
+
+Rebuild the app image after each release and restart the stack:
 
 ```bash
-# Required Variables
-NEXTAUTH_URL=https://your-domain.vercel.app
-NEXTAUTH_SECRET=your-64-character-secret-key
-DATABASE_URL=postgresql://user:pass@host:port/db
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=AKIA...
-AWS_SECRET_ACCESS_KEY=...
-ADMIN_EMAIL=admin@yourdomain.com
-ADMIN_PASSWORD=secure-password
-
-# Optional Variables
-DO_API_TOKEN=dop_v1_...
-WEBHOOK_URL=https://your-domain.vercel.app/api/webhooks/ses
+docker compose up --build -d
+docker compose ps
+docker compose logs -f waka
 ```
 
-### 3. Deploy to Vercel
+Back up PostgreSQL before upgrades. Do not run `docker compose down -v` unless the local database data is no longer needed.
 
-#### Option A: GitHub Integration (Recommended)
-1. Push your code to GitHub
-2. Connect repository to Vercel
-3. Configure environment variables
-4. Deploy automatically on push
+## Upgrade from the previous product name
 
-#### Option B: Vercel CLI
-```bash
-# Login to Vercel
-vercel login
+This upgrade changes the PostgreSQL database name and login role from the values used by the previous release to `waka`. It keeps the existing database in place and does not drop or recreate it.
 
-# Deploy to production
-vercel --prod
+Run these steps in order while the app is stopped:
 
-# Set environment variables
-vercel env add NEXTAUTH_URL
-vercel env add NEXTAUTH_SECRET
-vercel env add DATABASE_URL
-# ... add all other variables
-```
+1. Stop only the app container. Keep PostgreSQL running:
 
-#### Option C: One-Click Deploy
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=<your-repo-url>)
+   ```bash
+   docker compose stop waka
+   ```
 
-### 4. Domain Configuration
+2. Set connection variables for the current database and an administrator connection to the PostgreSQL maintenance database. Replace the placeholders with the values from the current deployment:
 
-**Custom Domain:**
-1. Go to Vercel Dashboard → Settings → Domains
-2. Add your custom domain
-3. Configure DNS records as shown
-4. Update `NEXTAUTH_URL` to your custom domain
+   ```bash
+   export OLD_DATABASE_URL='postgresql://<current-user>:<password>@<host>:5432/<current-database>'
+   export ADMIN_DATABASE_URL='postgresql://<admin-user>:<password>@<host>:5432/postgres'
+   export OLD_DATABASE_NAME='<current-database-name>'
+   export OLD_DATABASE_USER='<current-database-user>'
+   export NEW_DATABASE_URL='postgresql://waka:<password>@<host>:5432/waka'
+   ```
 
-**SSL Certificate:**
-- Automatically provisioned by Vercel
-- Usually takes 5-10 minutes to activate
+3. Create a backup before changing names:
 
-### 5. Post-Deployment Setup
+   ```bash
+   pg_dump --format=custom --file=waka-before-rename.dump "$OLD_DATABASE_URL"
+   ```
 
-**Database Initialization:**
+4. Rename the existing database and role. These commands preserve all rows, tables, indexes, and migration history:
 
-Automatic on first boot — the server applies `migrations/` before accepting traffic.
+   ```bash
+   psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c "ALTER DATABASE \"$OLD_DATABASE_NAME\" RENAME TO waka;"
+   psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c "ALTER ROLE \"$OLD_DATABASE_USER\" RENAME TO waka;"
+   ```
 
-**Verify Deployment:**
-1. Visit your deployed URL
-2. Check `/api/health` endpoint
-3. Test login with admin credentials
-4. Add a test domain
-5. Send a test email
+5. Update the environment file to use the renamed role and database. Keep the existing password unless you also change it in PostgreSQL:
 
-**AWS SES Configuration:**
-1. Verify your domain in AWS SES Console
-2. Move out of sandbox mode (if needed)
-3. Configure DKIM and SPF records
-4. Set up SNS webhooks (optional)
+   ```bash
+   perl -0pi -e 's/^DATABASE_URL=.*/DATABASE_URL=$ENV{NEW_DATABASE_URL}/m' .env
+   ```
 
-### 6. Performance Optimization
+6. Confirm the new connection before starting the app:
 
-**Vercel Configuration:**
-- Edge functions enabled automatically
-- Image optimization built-in
-- Static file caching optimized
+   ```bash
+   psql "$NEW_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'SELECT current_database(), current_user;'
+   ```
 
-**Database:**
-- Use connection pooling
-- Enable read replicas for high traffic
-- Monitor query performance
+7. Start Waka. Startup migrations are safe to run against the existing schema:
 
-**Monitoring:**
-- Vercel Analytics enabled by default
-- Set up error tracking (Sentry recommended)
-- Monitor AWS SES metrics
+   ```bash
+   docker compose up --build -d
+   docker compose ps
+   ```
 
-### 7. Scaling Considerations
-
-**Traffic Growth:**
-- Vercel scales automatically
-- Database may need upgrading
-- AWS SES limits may need increasing
-
-**Multi-Region:**
-- Configure multiple AWS regions
-- Use Vercel Edge Network
-- Consider database read replicas
-
-### 8. Security Checklist
-
-- [ ] Strong `NEXTAUTH_SECRET` (64+ characters)
-- [ ] Secure database passwords
-- [ ] AWS IAM with minimal permissions
-- [ ] Environment variables in Vercel (not in code)
-- [ ] HTTPS enforced (automatic with Vercel)
-- [ ] Regular security updates
-
-### 9. Troubleshooting
-
-**Common Issues:**
-
-**Build Errors:**
-```bash
-# Check build logs in Vercel Dashboard
-# Ensure all environment variables are set
-vercel logs
-```
-
-**Database Connection:**
-```bash
-# Test database connection
-node -e "const { Client } = require('pg'); const client = new Client(process.env.DATABASE_URL); client.connect().then(() => console.log('Connected!')).catch(console.error);"
-```
-
-
-
-### 10. Maintenance
-
-**Regular Tasks:**
-- Monitor Vercel usage and billing
-- Update dependencies monthly
-- Review AWS SES usage and limits
-- Backup database regularly
-- Monitor error rates and performance
-
-**Updating:**
-```bash
-# For GitHub integration, just push to main branch
-git push origin main
-
-# For CLI deployment
-vercel --prod
-```
-
-## Support
-
-- **Documentation**: Check README.md and SETUP.md
-- **Issues**: [GitHub Issues](https://github.com/eibrahim/waka/issues)
-
----
-
-**Total estimated cost for production deployment: $5-15/month**
-- Vercel: Free (hobby) or $20/month (Pro)
-- Database: $5-10/month (managed service)
-- AWS SES: $1-5/month (based on volume)
-- Domain: $10-15/year
+The application environment variable names do not change. `DATABASE_URL` keeps the same key; only its default connection value changes to the `waka` role and database. `POSTGRES_PASSWORD` also keeps the same key and password.

@@ -1,26 +1,45 @@
-version: "3.8"
-
 services:
+  postgres:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_DB: waka
+      POSTGRES_USER: waka
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U waka -d waka"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   waka:
     build: .
+    user: bun
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=production
-    env_file:
-      - .env.local
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://waka:change-me@postgres:5432/waka}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?Set NEXTAUTH_SECRET in .env}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Set ADMIN_EMAIL in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?Set AWS_ACCESS_KEY_ID in .env}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?Set AWS_SECRET_ACCESS_KEY in .env}
+      PORT: ${PORT:-3000}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      DOMAIN: ${DOMAIN:-}
+      SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-waka-events}
+      SES_SNS_TOPIC_ARN: ${SES_SNS_TOPIC_ARN:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
-  # Optional: PostgreSQL database if not using Supabase
-  # postgres:
-  #   image: postgres:15-alpine
-  #   environment:
-  #     POSTGRES_DB: waka
-  #     POSTGRES_USER: waka
-  #     POSTGRES_PASSWORD: your-password
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   ports:
-  #     - "5432:5432"
-# volumes:
-#   postgres_data:
+volumes:
+  postgres_data:

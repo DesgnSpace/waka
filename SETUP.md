@@ -1,38 +1,84 @@
-# Waka Setup Guide
+# Setup
 
-This guide will help you set up Waka from scratch.
+This guide runs Waka locally with Docker Compose. It assumes macOS or Linux, Docker, and an AWS account. The database migration runs automatically when the API starts.
 
-## 1. Prerequisites Setup
+## Local setup
 
-### PostgreSQL Database
+Run these steps in order from a fresh clone:
 
-1. **Option A: Local PostgreSQL**
+1. Clone the repository and copy the environment template:
 
    ```bash
-   # Install PostgreSQL (macOS)
-   brew install postgresql
-   brew services start postgresql
-
-   # Create database
-   createdb waka
+   git clone https://github.com/DesgnSpace/waka.git waka
+   cd waka
+   cp .env.example .env
    ```
 
-2. **Option B: Hosted PostgreSQL**
+2. Edit `.env`:
 
-   - Digital Ocean Managed Databases
-   - AWS RDS
-   - Google Cloud SQL
-   - Or any PostgreSQL-compatible service
+- Set `NEXTAUTH_SECRET` to a long random value.
+- Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` to the first dashboard login.
+- Set `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` to an IAM identity that can use SES.
+- Leave `DATABASE_URL` as-is for the Compose database unless you use another PostgreSQL service.
+- Leave `DATABASE_SSL=false` for the private Compose network.
 
-3. **Initialize database schema:**
+3. Start PostgreSQL and Waka:
 
-   Automatic. The server applies migrations from `migrations/` at startup; no manual SQL needed. The database only needs to exist and be reachable via `DATABASE_URL`.
+   ```bash
+   docker compose up --build -d
+   ```
 
-### AWS SES Setup
+   The API waits for PostgreSQL, then applies every unrecorded `.sql` file in `migrations/`. Applied files are recorded in `schema_migrations`. PostgreSQL 16 provides the `gen_random_uuid()` function used by the schema.
 
-1. Go to [AWS SES Console](https://console.aws.amazon.com/ses/)
-2. Request production access (move out of sandbox)
-3. Create an IAM user with SES permissions:
+4. Check the API and create the initial dashboard user:
+
+   ```bash
+   curl http://localhost:3000/api/health
+   curl -X POST http://localhost:3000/api/setup
+   ```
+
+5. Open `http://localhost:3000`. Sign in with the `ADMIN_EMAIL` and `ADMIN_PASSWORD` values from `.env`.
+
+To stop the services without deleting the database volume:
+
+```bash
+docker compose down
+```
+
+To remove the local database volume too:
+
+```bash
+docker compose down -v
+```
+
+## Environment variables
+
+The application reads these variables. `.env.example` contains the same list and safe placeholder values.
+
+| Variable | Required | Purpose | Safe example |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | Yes | PostgreSQL connection string for queries and startup migrations. | `postgresql://waka:change-me@postgres:5432/waka` |
+| `POSTGRES_PASSWORD` | Compose only | Password for the PostgreSQL container in `docker-compose.yml`. The Bun application does not read it. Keep it equal to the password in `DATABASE_URL`. | `change-me` |
+| `DATABASE_SSL` | No | PostgreSQL TLS mode. `false`, `disable`, or an empty value disables TLS; `true` or `require` verifies the certificate; `no-verify` or `insecure` uses TLS without certificate verification. | `false` |
+| `NEXTAUTH_SECRET` | Yes | Secret used to sign dashboard and API JWTs. | `replace-with-a-long-random-secret` |
+| `ADMIN_EMAIL` | No | Email for the default dashboard user. Used only when `ADMIN_PASSWORD` is also set. | `admin@example.com` |
+| `ADMIN_PASSWORD` | No | Password for the default dashboard user. Used only when `ADMIN_EMAIL` is also set. | `replace-with-a-strong-password` |
+| `AWS_REGION` | No | AWS SES region. Defaults to `us-east-1`. | `us-east-1` |
+| `AWS_ACCESS_KEY_ID` | Yes | IAM access key used for SES API calls. | `replace-with-aws-access-key-id` |
+| `AWS_SECRET_ACCESS_KEY` | Yes | Secret half of the IAM access key pair. | `replace-with-aws-secret-access-key` |
+| `NODE_ENV` | No | Controls the default Sentry environment and whether the session cookie gets the `Secure` flag. | `development` |
+| `PORT` | No | HTTP port. Defaults to `3000`. | `3000` |
+| `CORS_ORIGIN` | No | Comma-separated browser origins allowed by CORS. Empty means same-origin only unless `DOMAIN` is set. | `https://app.example.com` |
+| `DOMAIN` | No | Canonical host or origin used as the CORS origin when `CORS_ORIGIN` is empty. | `api.example.com` |
+| `SES_CONFIGURATION_SET` | No | Account-wide SES configuration set attached to sends. Defaults to `waka-events`. | `waka-events` |
+| `SES_SNS_TOPIC_ARN` | No | If set, only signed SNS messages from this topic are accepted by the SES webhook. | `arn:aws:sns:us-east-1:123456789012:waka-events` |
+| `SENTRY_DSN` | No | Enables Sentry error reporting when non-empty. | `https://examplePublicKey@o0.ingest.sentry.io/0` |
+
+Do not put real credentials in `.env.example`, source control, a Dockerfile, or a container image. Use `.env` locally and a secret store in production.
+
+## AWS SES setup
+
+Waka calls SES for domain verification, DKIM, configuration sets, sending, and custom MAIL FROM. Create a dedicated IAM user or role with this policy, then place its access key values in the environment:
 
 ```json
 {
@@ -45,10 +91,10 @@ This guide will help you set up Waka from scratch.
         "ses:SendRawEmail",
         "ses:VerifyDomainIdentity",
         "ses:GetIdentityVerificationAttributes",
-        "ses:DeleteIdentity",
         "ses:CreateConfigurationSet",
         "ses:VerifyDomainDkim",
-        "ses:GetIdentityDkimAttributes"
+        "ses:GetIdentityDkimAttributes",
+        "ses:SetIdentityMailFromDomain"
       ],
       "Resource": "*"
     }
@@ -56,178 +102,44 @@ This guide will help you set up Waka from scratch.
 }
 ```
 
-### Digital Ocean (Optional)
+When a domain is added, the application creates a per-domain SES configuration set named `waka-<domain-with-dashes>`. Email sends use the separate account-wide configuration set named by `SES_CONFIGURATION_SET`, which defaults to `waka-events`. Create that send configuration set in the SES console before the first send, or set `SES_CONFIGURATION_SET` to an existing set. To receive delivery, bounce, complaint, open, and click updates, configure the send configuration set in the SES console to publish to an SNS topic. The topic must deliver HTTP(S) notifications to:
 
-1. Create an API token at [Digital Ocean](https://cloud.digitalocean.com/account/api/tokens)
-2. Add your domains to DO's DNS management
-
-## 2. Environment Configuration
-
-1. Copy the example environment file:
-
-```bash
-cp .env.local.example .env.local
+```text
+https://your-public-host.example/api/webhooks/ses
 ```
 
-2. Edit `.env.local` with your actual values:
+That URL must be reachable from the public internet over HTTPS. It must accept `POST` requests, and the proxy must pass the request body unchanged. The endpoint validates the AWS SNS signature and confirms the subscription by calling the AWS `SubscribeURL`. Set `SES_SNS_TOPIC_ARN` to the topic ARN to reject messages from other topics.
 
-```env
-# Database
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-key
+### SES sandbox
 
-# AWS
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
+New SES accounts start in sandbox mode in each AWS region. In sandbox mode, SES limits sending and normally requires both sender and recipient addresses to be verified. A message to an unverified recipient is rejected. Request production access in the SES console before sending to arbitrary recipients. Sandbox status is regional, so use the same region in `AWS_REGION` when you request access and when the app sends mail.
 
-# Digital Ocean (optional)
-DO_API_TOKEN=your-do-token
+### Domain and DNS
 
-# Admin User
-ADMIN_EMAIL=admin@yourdomain.com
-ADMIN_PASSWORD=your-secure-password
+Add a domain in the dashboard. Copy the records shown by Waka to your DNS provider. The records include SES verification, DKIM, SPF, and DMARC. If you configure a custom MAIL FROM domain in the dashboard, also add the MX and SPF records shown for that domain. DNS changes can take time to appear. Verify the domain after the records are visible.
 
-# Security
-NEXTAUTH_SECRET=generate-a-long-random-string-here
-```
+## First email
 
-## 3. Installation
+After the domain status is `verified`, create an API key in the dashboard. The full key is shown only once. Send a test message:
 
 ```bash
-# Install dependencies
-npm install
-
-# Initialize default admin user
-curl -X POST http://localhost:3000/api/setup
-
-# Start development server
-npm run dev
-```
-
-## 4. First Steps
-
-1. Visit `http://localhost:3000`
-2. Login with your admin credentials
-3. Add your first domain
-4. Set up DNS records (automatic with DO, or manual)
-5. Verify your domain
-6. Create an API key
-7. Start sending emails!
-
-## 5. Testing the API
-
-Test with curl:
-
-```bash
-# Health check
-curl http://localhost:3000/api/health
-
-# Send an email (replace with your API key)
 curl -X POST http://localhost:3000/api/emails \
-  -H "Authorization: Bearer your-api-key" \
+  -H "Authorization: Bearer wka_your_api_key" \
   -H "Content-Type: application/json" \
   -d '{
-    "from": "test@yourdomain.com",
+    "from": "hello@example.com",
     "to": ["recipient@example.com"],
-    "subject": "Test Email",
-    "html": "<h1>Hello from Waka!</h1>"
+    "subject": "Waka test",
+    "text": "This is a test message."
   }'
 ```
 
-## 6. Production Deployment
+The `from` domain must match the verified domain attached to the API key. In SES sandbox mode, the recipient must also be verified.
 
-### Option 1: Vercel
+## Troubleshooting
 
-1. Push to GitHub
-2. Connect to Vercel
-3. Set environment variables
-4. Deploy
-
-### Option 2: Docker
-
-```bash
-# Build image
-docker build -t waka .
-
-# Run container
-docker run -p 3000:3000 --env-file .env.local waka
-```
-
-### Option 3: Traditional Server
-
-```bash
-# Build for production
-npm run build
-
-# Start production server
-npm start
-```
-
-## 7. Domain DNS Records
-
-When you add a domain, you'll need these DNS records:
-
-### For Amazon SES Verification
-
-```
-Type: TXT
-Name: _amazonses.yourdomain.com
-Value: [verification-token-from-ses]
-```
-
-### For Email Receiving (if needed)
-
-```
-Type: MX
-Name: yourdomain.com
-Value: 10 inbound-smtp.us-east-1.amazonaws.com
-```
-
-### For SPF
-
-```
-Type: TXT
-Name: yourdomain.com
-Value: v=spf1 include:amazonses.com ~all
-```
-
-### For DMARC
-
-```
-Type: TXT
-Name: _dmarc.yourdomain.com
-Value: v=DMARC1; p=quarantine; rua=mailto:dmarc@yourdomain.com
-```
-
-## 8. Troubleshooting
-
-### Common Issues
-
-1. **Database connection fails**
-
-   - Check Supabase credentials
-   - Ensure database schema is created
-
-2. **AWS SES errors**
-
-   - Verify AWS credentials
-   - Check SES account status (sandbox vs production)
-   - Confirm IAM permissions
-
-3. **Domain verification fails**
-
-   - Check DNS records are properly set
-   - Wait for DNS propagation (up to 48 hours)
-   - Verify domain ownership in DNS provider
-
-4. **API key authentication fails**
-   - Ensure domain is verified before creating keys
-   - Check API key format: `wka_[id]_[secret]`
-
-## 9. Support
-
-- Check the main README.md for API documentation
-- Review `migrations/` for schema details
-- Look at the code in `/src/lib/` for implementation details
+- `DATABASE_URL` errors: check that PostgreSQL is running and that the database exists.
+- SES `AccessDenied`: check the IAM policy and the AWS region.
+- SES recipient rejection: check whether the account is still in sandbox mode.
+- Domain remains pending: check the exact DNS names and values shown in the dashboard.
+- Webhook events do not arrive: check that the SNS subscription is confirmed and the HTTPS endpoint is public.

@@ -1,187 +1,53 @@
-# Waka - Project Summary
+# Project Summary
 
-## Overview
+## Runtime
 
-Waka is a complete, self-hosted email service that provides a Resend-compatible API. Built with Next.js, it integrates with Amazon SES for email delivery and optionally with Digital Ocean for automatic DNS management.
+- `server.ts` starts the Bun HTTP server on `PORT` or `3000`.
+- The server runs `src/lib/migrate.ts` before accepting traffic.
+- SQL files in `migrations/` are applied in sorted order and recorded in `schema_migrations`.
+- `src/server/` contains the HTTP routes, handlers, dashboard HTML, and SES webhook.
+- `src/lib/` contains PostgreSQL, authentication, API key, domain, SES, SNS, and DNS logic.
 
-## Architecture
+## Services
 
-### Backend Services
+- PostgreSQL stores users, domains, API keys, email logs, email events, and webhook events.
+- Amazon SES verifies domains and sends email.
+- Amazon SNS sends signed SES event notifications to `POST /api/webhooks/ses`.
+- A browser may use the dashboard at `/`; API clients use `/api/*`.
 
-- **Next.js API Routes**: RESTful API endpoints
-- **Supabase**: PostgreSQL database with RLS
-- **Amazon SES**: Email delivery service
-- **Digital Ocean**: Automatic DNS management
-- **JWT Authentication**: Secure user sessions
+## Routes
 
-### Frontend
+- `GET /api/health`
+- `POST /api/setup`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `GET|POST /api/domains`
+- `GET|DELETE /api/domains/:id`
+- `POST /api/domains/:id/verify`
+- `GET|POST /api/api-keys`
+- `PUT|DELETE /api/api-keys/:id`
+- `POST /api/emails`
+- `GET /api/emails/logs`
+- `GET /api/emails/:id`
+- `POST /api/webhooks/ses`
+- `POST /api/tools/email-dns-checker`
 
-- **Next.js 15**: React-based dashboard
-- **Tailwind CSS**: Modern UI styling
-- **TypeScript**: Type-safe development
+Dashboard routes include `/`, `/login`, `/logout`, `/dashboard`, and domain and log views under `/ui/`.
 
-## File Structure
+## Database
 
-```
-src/
-├── app/
-│   ├── api/
-│   │   ├── auth/           # Authentication endpoints
-│   │   ├── domains/        # Domain management
-│   │   ├── api-keys/       # API key management
-│   │   ├── emails/         # Email sending & logs
-│   │   ├── webhooks/       # SES webhook handler
-│   │   ├── health/         # Health check
-│   │   └── setup/          # Initial setup
-│   ├── layout.tsx          # Root layout with AuthProvider
-│   └── page.tsx            # Main app entry point
-├── components/
-│   ├── Dashboard.tsx       # Main dashboard container
-│   ├── LoginForm.tsx       # Authentication form
-│   ├── DomainsTab.tsx      # Domain management UI
-│   ├── ApiKeysTab.tsx      # API key management UI
-│   └── EmailLogsTab.tsx    # Email logs & monitoring
-├── contexts/
-│   └── AuthContext.tsx     # React context for auth state
-└── lib/
-    ├── api.ts              # Frontend API client
-    ├── auth.ts             # User authentication logic
-    ├── api-keys.ts         # API key management
-    ├── domains.ts          # Domain operations
-    ├── ses.ts              # Amazon SES integration
-    ├── digitalocean.ts     # DO DNS management
-    ├── supabase.ts         # Database client & types
-    └── middleware.ts       # API middleware functions
-```
+The source of truth is `migrations/001_baseline.sql`. It creates `users`, `domains`, `api_keys`, `email_logs`, `email_events`, and `webhook_events`, plus indexes and timestamp triggers. The application migration runs at startup for Docker Compose deployments.
 
-## Database Schema
+## Configuration
 
-### Tables
+See the complete environment variable table in [SETUP.md](SETUP.md) and the safe template in `.env.example`. Deployment differences are documented in [DEPLOYMENT.md](DEPLOYMENT.md).
 
-- **users**: Admin user accounts
-- **domains**: Email sending domains
-- **api_keys**: API keys for authentication
-- **email_logs**: All sent email records
-- **webhook_events**: SES delivery events
+## Request flow
 
-### Key Features
-
-- Row Level Security (RLS) enabled
-- UUID primary keys
-- Comprehensive indexing
-- JSON fields for flexible data
-
-## API Endpoints
-
-### Authentication
-
-- `POST /api/auth/login` - User login
-- `GET /api/auth/me` - Get current user
-
-### Domain Management
-
-- `GET /api/domains` - List domains
-- `POST /api/domains` - Add new domain
-- `DELETE /api/domains/{id}` - Remove domain
-- `POST /api/domains/{id}/verify` - Check verification
-
-### API Keys
-
-- `GET /api/api-keys` - List API keys
-- `POST /api/api-keys` - Create new key
-- `DELETE /api/api-keys/{id}` - Delete key
-
-### Email Operations (Resend Compatible)
-
-- `POST /api/emails` - Send email
-- `GET /api/emails/logs` - Email history
-- `GET /api/emails/{id}` - Email details
-
-### System
-
-- `GET /api/health` - Health check
-- `POST /api/setup` - Initialize admin user
-- `POST /api/webhooks/ses` - SES events
-
-## Key Integrations
-
-### Amazon SES
-
-- Domain verification
-- Email sending (simple & raw)
-- Configuration sets
-- Webhook events
-- Bounce/complaint handling
-
-### Digital Ocean DNS
-
-- Automatic record creation
-- Domain validation
-- DNS management API
-- Error handling & fallback
-
-### Supabase
-
-- PostgreSQL database
-- Real-time subscriptions
-- Row Level Security
-- Admin/anon key separation
-
-## Security Features
-
-- JWT-based authentication
-- API key hashing (bcrypt)
-- Row Level Security policies
-- CORS handling
-- Input validation (Zod)
-- Environment variable separation
-
-## Deployment Options
-
-1. **Vercel**: Serverless deployment
-2. **Docker**: Containerized deployment
-3. **Traditional**: Node.js server
-4. **Docker Compose**: Local development
-
-## Environment Variables
-
-Essential configuration:
-
-- Database: Supabase credentials
-- AWS: SES access keys
-- Digital Ocean: API token (optional)
-- Security: JWT secret
-- Admin: Default user credentials
-
-## Getting Started
-
-1. **Setup Services**: Supabase + AWS SES + (optional) Digital Ocean
-2. **Configure Environment**: Copy .env.local.example
-3. **Initialize Database**: Automatic — migrations run at server startup
-4. **Install & Run**: npm install && npm run dev
-5. **Create Admin**: POST /api/setup
-6. **Add Domain**: Use dashboard to add first domain
-7. **Verify Domain**: Check DNS records and verify
-8. **Create API Key**: Generate key for sending
-9. **Send Emails**: Use Resend SDK with new endpoint
-
-## Resend Compatibility
-
-Waka implements the same API contract as Resend:
-
-```javascript
-// Just change the baseURL - everything else works the same
-const resend = new Resend("your-api-key", {
-  baseURL: "https://your-waka.com/api",
-});
-```
-
-## Future Enhancements
-
-- Email templates
-- Campaign management
-- Advanced analytics
-- Multi-user support
-- SMTP server
-- Email scheduling
-- Enhanced webhooks
+1. The operator starts the server with PostgreSQL and AWS credentials.
+2. The startup migration creates or updates the schema.
+3. The operator creates the first dashboard user with `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
+4. The dashboard verifies a domain in SES and shows DNS records.
+5. The operator verifies DNS, then creates a domain API key.
+6. A client sends mail to `/api/emails` with that key.
+7. SES sends event notifications through SNS to the public webhook.

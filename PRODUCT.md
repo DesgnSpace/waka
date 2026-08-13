@@ -1,36 +1,33 @@
 # Product
 
-## Register
+## Purpose
 
-product
+Waka is a self-hosted, Resend-compatible transactional email API. It uses Amazon SES for delivery and PostgreSQL for users, domains, API keys, email logs, and SES event records.
 
 ## Users
 
-Developers who self-host email infrastructure. Know Docker and AWS. Want control over their transactional email and cost savings vs SaaS providers like Resend or SendGrid. Comfortable editing config files and DNS records.
+Developers who can run Docker, manage PostgreSQL, configure AWS SES, and edit DNS records. They want control of their email infrastructure and AWS-based usage costs instead of a hosted email API subscription.
 
-## Product Purpose
+## Supported behavior
 
-Open-source, self-hosted transactional email API that is a drop-in Resend replacement using Amazon SES. Exists to give developers full control over their email infrastructure at AWS-native prices with no vendor lock-in.
+- Dashboard login with JWT-based sessions.
+- Domain verification through Amazon SES.
+- SES DKIM and optional custom MAIL FROM setup.
+- Manual DNS record display for SES verification, DKIM, SPF, and DMARC.
+- Per-domain API keys with send permissions.
+- Resend-compatible email sending, including HTML, text, attachments, reply-to addresses, and tags.
+- Email logs and signed SNS/SES delivery, bounce, complaint, open, and click events.
+- Docker Compose deployment files.
 
-Success: a dev can spin up Waka with Docker, point their existing Resend SDK at it via one env var, and send email — no code changes, no markup.
+## Limits and dependencies
 
-## Brand Personality
+- Amazon SES account status and sending limits control delivery.
+- SES sandbox mode limits recipients until AWS grants production access.
+- DNS records must be created by the operator.
+- A reachable PostgreSQL database is required.
+- The SES webhook needs a public HTTPS endpoint.
+- Waka has no hosted service fee. Operators pay AWS, database, compute, DNS, and network costs.
 
-Technical, precise, utilitarian.
+## Out of scope
 
-Voice: direct, specific, no marketing. Says exactly what the thing does in the fewest words. Lets the tool speak for itself.
-
-## Anti-references
-
-No SaaS-landing look. No gradient heroes, no big-number-plus-label metric blocks, no "supercharge/empower/seamless" copy, no glass cards, no numbered section eyebrows (01 / 02 / 03). This is a tool you install, not a service you subscribe to.
-
-## Design Principles
-
-- **Open source earns the trust.** No upsells, no metered tiers, no "enterprise" features behind a paywall. What you see is what you run.
-- **Functional first.** Every element earns its place by helping the user do something. Decorative is waste.
-- **Developer respect.** No hand-holding, no fake polish. Clear labels, complete API docs, working defaults.
-- **Self-contained.** One Docker compose, one env file, one migration. The UI exists to manage what the API does, not to sell anything.
-
-## Accessibility & Inclusion
-
-WCAG 2.1 AA minimum. Reduced motion respected. Reliable contrast (body text ≥4.5:1). Works without JavaScript for content pages.
+Waka does not provide hosted infrastructure, automatic DNS changes, email templates, scheduling, an SMTP server, or multi-user role management.
