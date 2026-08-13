@@ -2,7 +2,7 @@
 
 ## Purpose
 
-FreeResend is a self-hosted, Resend-compatible transactional email API. It uses Amazon SES for delivery and PostgreSQL for users, domains, API keys, email logs, and SES event records.
+Waka is a self-hosted, Resend-compatible transactional email API. It uses Amazon SES for delivery and PostgreSQL for users, domains, API keys, email logs, and SES event records.
 
 ## Users
 
@@ -26,8 +26,8 @@ Developers who can run Docker, manage PostgreSQL, configure AWS SES, and edit DN
 - DNS records must be created by the operator.
 - A reachable PostgreSQL database is required.
 - The SES webhook needs a public HTTPS endpoint.
-- FreeResend has no hosted service fee. Operators pay AWS, database, compute, DNS, and network costs.
+- Waka has no hosted service fee. Operators pay AWS, database, compute, DNS, and network costs.
 
 ## Out of scope
 
-FreeResend does not provide hosted infrastructure, automatic DNS changes, email templates, scheduling, an SMTP server, or multi-user role management.
+Waka does not provide hosted infrastructure, automatic DNS changes, email templates, scheduling, an SMTP server, or multi-user role management.

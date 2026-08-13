@@ -1,12 +1,12 @@
 # Contributing
 
-FreeResend is a Bun + TypeScript service. Read [README.md](README.md) for the product and [SETUP.md](SETUP.md) for local setup.
+Waka is a Bun + TypeScript service. Read [README.md](README.md) for the product and [SETUP.md](SETUP.md) for local setup.
 
 ## Development
 
 ```bash
-git clone https://github.com/DesgnSpace/waka.git freeresend
-cd freeresend
+git clone https://github.com/DesgnSpace/waka.git waka
+cd waka
 bun install --frozen-lockfile
 cp .env.example .env
 ```
@@ -15,7 +15,7 @@ Set the local PostgreSQL and AWS values in `.env`, then start the stack:
 
 ```bash
 docker compose up -d postgres
-DATABASE_URL=postgresql://freeresend:change-me@localhost:5432/freeresend bun run dev
+DATABASE_URL=postgresql://waka:change-me@localhost:5432/waka bun run dev
 ```
 
 The inline `DATABASE_URL` points the host Bun process at the published PostgreSQL port. The server applies pending migrations before it listens. Use `docker compose up --build` when you want to test the image instead of the local Bun process. Do not commit `.env` or real credentials.
@@ -40,7 +40,7 @@ bunx tsc --noEmit
 For a container check, run:
 
 ```bash
-docker build -t freeresend:local .
+docker build -t waka:local .
 ```
 
 ## Pull requests
