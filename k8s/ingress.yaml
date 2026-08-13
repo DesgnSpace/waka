@@ -17,21 +17,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - www.waka.com
-        - waka.com
+        - api.example.com
       secretName: waka-tls
   rules:
-    - host: www.waka.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: waka
-                port:
-                  number: 80
-    - host: waka.com
+    - host: api.example.com
       http:
         paths:
           - path: /

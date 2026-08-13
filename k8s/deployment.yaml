@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: waka
-          image: registry.digitalocean.com/curatedletters/waka:latest
+          image: registry.example.com/freeresend:replace-me
           ports:
             - containerPort: 3000
               name: http
@@ -26,11 +26,13 @@ spec:
               value: "production"
             - name: PORT
               value: "3000"
-            - name: HOSTNAME
-              value: "0.0.0.0"
           envFrom:
             - secretRef:
                 name: waka-secrets
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
           resources:
             requests:
               cpu: 200m
@@ -65,5 +67,3 @@ spec:
             timeoutSeconds: 5
             successThreshold: 1
             failureThreshold: 30
-      imagePullSecrets:
-        - name: curatedletters
