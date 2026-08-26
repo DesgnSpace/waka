@@ -2,6 +2,7 @@ import { beforeEach, expect, mock, test } from "bun:test";
 import { HttpError } from "./http";
 import type { Req } from "./http";
 import { executedQueries, installFakeDatabase, onFakeQuery } from "@/lib/fake-database";
+import { fakeRateLimitModule } from "@/lib/fake-rate-limit";
 
 const userId = "11111111-1111-4111-8111-111111111111";
 const apiKeyId = "22222222-2222-4222-8222-222222222222";
@@ -59,9 +60,8 @@ let apiKeyQuotaFailAfter: number | null = null;
 let apiKeyQuotaCalls = 0;
 
 mock.module("@/lib/rate-limit", () => ({
+  ...fakeRateLimitModule,
   checkRateLimit: async () => ({ allowed: !rateLimitShouldFail, retryAfterSeconds: 60 }),
-  requestAddress: () => "127.0.0.1",
-  purgeExpiredRateLimitBuckets: async () => {},
 }));
 mock.module("@/lib/quotas", () => ({
   reserveDailySend: async () => {

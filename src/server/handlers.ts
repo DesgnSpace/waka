@@ -77,7 +77,7 @@ type WebhookEventRow = DbRow<{
 }>;
 
 // ----------------------------------------------------------------------------
-// health + setup
+// health
 // ----------------------------------------------------------------------------
 
 export function health(): Response {
@@ -87,10 +87,6 @@ export function health(): Response {
     service: "Waka",
     version: "1.0.0",
   });
-}
-
-export async function setup(): Promise<Response> {
-  throw new HttpError(404, { error: "Not found" });
 }
 
 // ----------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import { HttpError } from "./http";
 import type { Req } from "./http";
 import { executedQueries, installFakeDatabase, onFakeQuery } from "@/lib/fake-database";
 import type { FakeQueryResult } from "@/lib/fake-database";
+import { fakeRateLimitModule } from "@/lib/fake-rate-limit";
 
 const userId = "11111111-1111-4111-8111-111111111111";
 const apiKeyId = "22222222-2222-4222-8222-222222222222";
@@ -68,10 +69,7 @@ mock.module("@/lib/ses", () => ({
   mailFromRecords: () => [],
   setMailFromDomain: unusedSesFn,
 }));
-mock.module("@/lib/rate-limit", () => ({
-  checkRateLimit: async () => ({ allowed: true }),
-  requestAddress: () => "127.0.0.1",
-}));
+mock.module("@/lib/rate-limit", () => fakeRateLimitModule);
 mock.module("@/lib/quotas", () => ({ reserveDailySend: async () => true, reserveApiKeyDailySend: async () => true }));
 
 const { sendEmailHandler } = await import("./handlers");

@@ -1,5 +1,6 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 import { executedQueries, installFakeDatabase, onFakeQuery } from "@/lib/fake-database";
+import { fakeRateLimitModule } from "@/lib/fake-rate-limit";
 
 const userId = "11111111-1111-4111-8111-111111111111";
 const domainId = "33333333-3333-4333-8333-333333333333";
@@ -49,10 +50,7 @@ mock.module("@/lib/ses", () => ({
   mailFromRecords: () => [],
   setMailFromDomain: unused,
 }));
-mock.module("@/lib/rate-limit", () => ({
-  checkRateLimit: async () => ({ allowed: true }),
-  requestAddress: () => "127.0.0.1",
-}));
+mock.module("@/lib/rate-limit", () => fakeRateLimitModule);
 mock.module("@/lib/quotas", () => ({ reserveDailySend: async () => true, reserveApiKeyDailySend: async () => true }));
 
 const { sendEmailHandler } = await import("./handlers");

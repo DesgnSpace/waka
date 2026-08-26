@@ -30,10 +30,12 @@ export async function fakeTransaction<T>(cb: (client: { query: typeof fakeQuery 
   return cb({ query: fakeQuery });
 }
 
+const fakePool = { connect: async () => ({ query: fakeQuery, release: () => {} }) };
 export const fakeDatabase = {
   query: fakeQuery,
   transaction: fakeTransaction,
-  pool: { connect: async () => ({ query: fakeQuery, release: () => {} }) },
+  pool: fakePool,
+  db: fakePool,
 };
 
 export function installFakeDatabase(specifier: string): void {

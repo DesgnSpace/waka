@@ -2,6 +2,7 @@ import { beforeEach, expect, mock, test } from "bun:test";
 import { HttpError } from "./http";
 import type { Req } from "./http";
 import { executedQueries, installFakeDatabase, onFakeQuery } from "@/lib/fake-database";
+import { fakeRateLimitModule } from "@/lib/fake-rate-limit";
 
 const userId = "11111111-1111-4111-8111-111111111111";
 const apiKeyId = "22222222-2222-4222-8222-222222222222";
@@ -66,13 +67,9 @@ mock.module("@/lib/ses", () => ({
 
 // Real-like mocks that respect per-key limits; per-key bucket key is `send:key:<id>`
 mock.module("@/lib/rate-limit", () => ({
+  ...fakeRateLimitModule,
   checkRateLimit: async (key: string, limit: number) => {
     rateLimitCalls.push(key);
-    // Simulate per-key bucket: fail when limit is 1 and second call happens
-    // For testing, we use a simple counter keyed by bucket.
-    // The test controls expected behavior by setting currentApiKey.rate_limit_per_minute.
-    // If the bucket is per-key and limit is 1, second call within window fails.
-    // We store call counts in a global map.
     const counts = (globalThis as unknown as { __rateCounts?: Map<string, number> }).__rateCounts ?? new Map<string, number>();
     (globalThis as unknown as { __rateCounts: Map<string, number> }).__rateCounts = counts;
     const prev = counts.get(key) ?? 0;
@@ -82,7 +79,6 @@ mock.module("@/lib/rate-limit", () => ({
     counts.set(key, prev + 1);
     return { allowed: true, retryAfterSeconds: 0 };
   },
-  requestAddress: () => "127.0.0.1",
 }));
 mock.module("@/lib/quotas", () => ({
   reserveDailySend: async () => !accountDailyShouldFail,
