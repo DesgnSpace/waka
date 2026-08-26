@@ -30,7 +30,11 @@ export async function fakeTransaction<T>(cb: (client: { query: typeof fakeQuery 
   return cb({ query: fakeQuery });
 }
 
-export const fakeDatabase = { query: fakeQuery, transaction: fakeTransaction, pool: { connect: async () => ({ query: fakeQuery, release: () => {} }) } };
+export const fakeDatabase = {
+  query: fakeQuery,
+  transaction: fakeTransaction,
+  pool: { connect: async () => ({ query: fakeQuery, release: () => {} }) },
+};
 
 export function installFakeDatabase(specifier: string): void {
   mock.module(specifier, () => fakeDatabase);

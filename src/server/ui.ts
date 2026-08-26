@@ -601,7 +601,7 @@ type DomainKeys = Awaited<ReturnType<typeof getDomainApiKeys>>;
 
 // Email activity status uses words and color together.
 function statusTag(status: string): string {
-  const known = ["delivered", "sent", "failed", "bounced", "complained", "pending"];
+  const known = ["delivered", "sent", "failed", "bounced", "complained", "pending", "scheduled", "sending"];
   const tone = known.includes(status) ? status : "unknown";
   const labels: Record<string, string> = {
     delivered: "delivered",
@@ -610,6 +610,8 @@ function statusTag(status: string): string {
     bounced: "not delivered",
     complained: "spam complaint",
     pending: "processing",
+    scheduled: "scheduled",
+    sending: "processing",
   };
   const label = labels[status] ?? "unknown";
   return `<span class="status-badge status-${tone}"><span class="status-mark" aria-hidden="true"></span>${esc(label)}</span>`;
