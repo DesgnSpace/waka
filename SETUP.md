@@ -17,7 +17,6 @@ Run these steps in order from a fresh clone:
 2. Edit `.env`:
 
 - Set `NEXTAUTH_SECRET` to a long random value.
-- Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` to the first dashboard login.
 - Set `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` to an IAM identity that can use SES.
 - Leave `DATABASE_URL` as-is for the Compose database unless you use another PostgreSQL service.
 - Leave `DATABASE_SSL=false` for the private Compose network.
@@ -30,14 +29,18 @@ Run these steps in order from a fresh clone:
 
    The API waits for PostgreSQL, then applies every unrecorded `.sql` file in `migrations/`. Applied files are recorded in `schema_migrations`. PostgreSQL 16 provides the `gen_random_uuid()` function used by the schema.
 
-4. Check the API and create the initial dashboard user:
+4. Check the API and create your dashboard account:
 
    ```bash
    curl http://localhost:3000/api/health
-   curl -X POST http://localhost:3000/api/setup
+   curl -X POST http://localhost:3000/api/auth/signup \
+     -H "Content-Type: application/json" \
+     -d '{"email": "you@example.com", "password": "a-password-of-12-plus-characters"}'
    ```
 
-5. Open `http://localhost:3000`. Sign in with the `ADMIN_EMAIL` and `ADMIN_PASSWORD` values from `.env`.
+   The password needs at least 12 characters.
+
+5. Open `http://localhost:3000`. Sign in with the email and password you signed up with.
 
 To stop the services without deleting the database volume:
 
@@ -61,8 +64,6 @@ The application reads these variables. `.env.example` contains the same list and
 | `POSTGRES_PASSWORD` | Compose only | Password for the PostgreSQL container in `docker-compose.yml`. The Bun application does not read it. Keep it equal to the password in `DATABASE_URL`. | `change-me` |
 | `DATABASE_SSL` | No | PostgreSQL TLS mode. `false`, `disable`, or an empty value disables TLS; `true` or `require` verifies the certificate; `no-verify` or `insecure` uses TLS without certificate verification. | `false` |
 | `NEXTAUTH_SECRET` | Yes | Secret used to sign dashboard and API JWTs. | `replace-with-a-long-random-secret` |
-| `ADMIN_EMAIL` | No | Email for the default dashboard user. Used only when `ADMIN_PASSWORD` is also set. | `admin@example.com` |
-| `ADMIN_PASSWORD` | No | Password for the default dashboard user. Used only when `ADMIN_EMAIL` is also set. | `replace-with-a-strong-password` |
 | `AWS_REGION` | No | AWS SES region. Defaults to `us-east-1`. | `us-east-1` |
 | `AWS_ACCESS_KEY_ID` | Yes | IAM access key used for SES API calls. | `replace-with-aws-access-key-id` |
 | `AWS_SECRET_ACCESS_KEY` | Yes | Secret half of the IAM access key pair. | `replace-with-aws-secret-access-key` |

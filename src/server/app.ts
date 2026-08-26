@@ -15,7 +15,6 @@ export function serveOptions() {
     routes: {
       // --- JSON API (Resend-compatible + dashboard backend) ---
       "/api/health": methods({ GET: h.health }),
-      "/api/setup": methods({ POST: h.setup }),
       "/api/auth/login": methods({ POST: h.login }),
       "/api/auth/signup": methods({ POST: h.signup }),
       "/api/auth/me": methods({ GET: h.me }),
