@@ -546,15 +546,32 @@ export async function emailLogs(req: Req): Promise<Response> {
 }
 
 export async function getEmail(req: Req): Promise<Response> {
-  const user = requireUser(req);
+  let scopedUserId: string;
+  let scopedDomainId: string | null = null;
+  const auth = req.headers.get("authorization");
+  if (auth?.startsWith("Bearer wka_")) {
+    const apiKey = await requireApiKey(req);
+    if (!apiKey.permissions.includes("send")) {
+      return json(
+        { error: "This API key can't retrieve emails. Create a key with send permission." },
+        403,
+      );
+    }
+    scopedUserId = apiKey.user_id;
+    scopedDomainId = apiKey.domain_id;
+  } else {
+    scopedUserId = requireUser(req).id;
+  }
+
   const emailResult = await query<EmailDetailRow>(
     `SELECT el.*, d.domain as domain_name, d.user_id as domain_user_id, ak.key_name as api_key_name
      FROM email_logs el
      JOIN domains d ON el.domain_id = d.id AND d.user_id = $2
      LEFT JOIN api_keys ak ON el.api_key_id = ak.id
        AND ak.user_id = d.user_id AND ak.domain_id = el.domain_id
-     WHERE el.id = $1`,
-    [pathUuid(req), user.id]
+     WHERE el.id = $1
+       AND ($3::uuid IS NULL OR el.domain_id = $3)`,
+    [pathUuid(req), scopedUserId, scopedDomainId]
   );
   if (emailResult.rows.length === 0) return json({ error: "Email not found" }, 404);
 
@@ -565,8 +582,9 @@ export async function getEmail(req: Req): Promise<Response> {
       JOIN email_logs el ON el.id = we.email_log_id
       JOIN domains d ON d.id = el.domain_id AND d.user_id = $2
       WHERE we.email_log_id = $1
+        AND ($3::uuid IS NULL OR el.domain_id = $3)
       ORDER BY we.created_at DESC`,
-    [pathUuid(req), user.id]
+    [pathUuid(req), scopedUserId, scopedDomainId]
   );
 
   const email = {

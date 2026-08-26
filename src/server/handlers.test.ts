@@ -32,14 +32,58 @@ const sendEmail = mock(async () => {
 });
 
 installFakeDatabase("@/lib/database");
-mock.module("@/lib/auth", () => ({
-  authenticateUser: async () => null,
-  createUser: async () => {},
-  generateJWT: () => "jwt",
-  verifyJWT: () => null,
-}));
+mock.module("@/lib/auth", () => {
+  const jwt = require("jsonwebtoken");
+  return {
+    authenticateUser: async () => null,
+    createUser: async () => {},
+    generateJWT: (user: { id: string; email: string; name?: string }) =>
+      jwt.sign(
+        { id: user.id, email: user.email, name: user.name },
+        process.env.NEXTAUTH_SECRET!,
+        { algorithm: "HS256", expiresIn: "1h" },
+      ),
+    verifyJWT: (token: string) => {
+      try {
+        const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET!, {
+          algorithms: ["HS256"],
+        }) as Record<string, unknown>;
+        if (
+          typeof decoded.id === "string" &&
+          typeof decoded.email === "string"
+        ) {
+          return { id: decoded.id as string, email: decoded.email as string, name: decoded.name as string | undefined };
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    },
+  };
+});
 mock.module("@/lib/api-keys", () => ({
-  verifyApiKey: async () => apiKey,
+  verifyApiKey: async (token: string) => {
+    if (token.startsWith("wka_test")) return apiKey;
+    if (token.startsWith("wka_send"))
+      return {
+        id: "00000000-0000-4000-a000-0000000000cc",
+        user_id: "00000000-0000-4000-a000-00000000000a",
+        domain_id: "00000000-0000-4000-a000-0000000000aa",
+        key_name: "test key",
+        key_prefix: "wka_send",
+        permissions: ["send"],
+      };
+    if (token.startsWith("wka_nosend"))
+      return {
+        id: "00000000-0000-4000-a000-0000000000cc",
+        user_id: "00000000-0000-4000-a000-00000000000a",
+        domain_id: "00000000-0000-4000-a000-0000000000aa",
+        key_name: "test key",
+        key_prefix: "wka_nosend",
+        permissions: ["webhooks"],
+      };
+    return null;
+  },
   generateApiKey: async () => {
     throw new Error("not used");
   },
@@ -62,10 +106,7 @@ mock.module("@/lib/ses", () => ({
   mailFromRecords: () => [],
   setMailFromDomain: unusedSesFn,
 }));
-mock.module("@/lib/rate-limit", () => ({
-  checkRateLimit: async () => ({ allowed: true }),
-  requestAddress: () => "127.0.0.1",
-}));
+
 mock.module("@/lib/quotas", () => ({ reserveDailySend: async () => true }));
 
 const { sendEmailHandler } = await import("./handlers");
@@ -165,6 +206,8 @@ test("a successful send logs status sent with the SES message id and returns the
 test("the request still fails with the provider error when the failed row cannot be written", async () => {
   onFakeQuery((sql, params = []) => {
     if (sql.includes("INSERT INTO email_logs")) throw new Error("db down");
+    if (sql.includes("rate_limit_buckets"))
+      return { rows: [{ window_started_at: new Date().toISOString(), request_count: 1 }], rowCount: 1 };
     if (sql.includes("FROM domains")) {
       return params[0] === domainId && params[1] === userId
         ? { rows: [domainRow], rowCount: 1 }
