@@ -358,6 +358,13 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
     contentType: att.contentType || att.content_type || "application/octet-stream",
   }));
 
+  // Persist attachment metadata only — never the raw base64 payload.
+  const attachmentMeta = (attachments ?? []).map((a) => ({
+    filename: a.filename,
+    contentType: a.contentType || a.content_type || "application/octet-stream",
+    size: decodedBase64Bytes(a.content),
+  }));
+
   let messageId: string;
   try {
     messageId = await sendEmail({
@@ -379,20 +386,41 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
     const reason = errorMessage(err);
     const statusCode = errorHttpStatus(err) ?? 0;
     console.error("SES send failed:", name, reason);
+
+    const detail = reason || "Email provider rejected the message.";
+    try {
+      await query(
+        `INSERT INTO email_logs (
+          api_key_id, domain_id, from_email, to_emails, cc_emails, bcc_emails,
+          subject, html_content, text_content, attachments, status, ses_message_id, error_message
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [
+          apiKey.id,
+          domain.id,
+          from,
+          JSON.stringify(to),
+          JSON.stringify(cc || []),
+          JSON.stringify(bcc || []),
+          subject,
+          html,
+          text,
+          JSON.stringify(attachmentMeta),
+          "failed",
+          null,
+          name ? `${name}: ${detail}` : detail,
+        ]
+      );
+    } catch (logError) {
+      console.error("Failed to record rejected email:", logError);
+    }
+
     const status = statusCode >= 400 && statusCode < 500 ? statusCode : 502;
     throw new HttpError(status, {
-      error: reason || "Email provider rejected the message.",
-      message: reason || "Email provider rejected the message.",
+      error: detail,
+      message: detail,
       code: name,
     });
   }
-
-  // Persist attachment metadata only — never the raw base64 payload.
-  const attachmentMeta = (attachments ?? []).map((a) => ({
-    filename: a.filename,
-    contentType: a.contentType || a.content_type || "application/octet-stream",
-    size: decodedBase64Bytes(a.content),
-  }));
 
   try {
     const result = await query<{ id: string }>(
