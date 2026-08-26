@@ -39,8 +39,6 @@ Waka does not create DNS records automatically. It shows the SES verification, D
 - [SETUP.md](SETUP.md): local setup, environment variables, SES, and the first email
 - [DEPLOYMENT.md](DEPLOYMENT.md): Docker Compose production deployment
 - [CONTRIBUTING.md](CONTRIBUTING.md): development and pull request rules
-- [PRODUCT.md](PRODUCT.md): product scope and supported behavior
-- [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md): current architecture and routes
 
 ## API examples
 
@@ -60,7 +58,24 @@ curl -X POST https://your-host.example/api/emails \
 
 The Resend Node.js SDK can use the same API key when its base URL is set to `https://your-host.example/api`.
 
-The complete route list is in [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md).
+## Routes
+
+- `GET /api/health`
+- `POST /api/setup`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `GET|POST /api/domains`
+- `GET|DELETE /api/domains/:id`
+- `POST /api/domains/:id/verify`
+- `GET|POST /api/api-keys`
+- `PUT|DELETE /api/api-keys/:id`
+- `POST /api/emails`
+- `GET /api/emails/logs`
+- `GET /api/emails/:id`
+- `POST /api/webhooks/ses`
+- `POST /api/tools/email-dns-checker`
+
+Dashboard routes are `/`, `/login`, `/logout`, `/dashboard`, and the domain and log views under `/ui/`.
 
 ## License
 
