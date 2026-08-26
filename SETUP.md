@@ -70,6 +70,7 @@ The application reads these variables. `.env.example` contains the same list and
 | `PORT` | No | HTTP port. Defaults to `3000`. | `3000` |
 | `CORS_ORIGIN` | No | Comma-separated browser origins allowed by CORS. Empty means same-origin only unless `DOMAIN` is set. | `https://app.example.com` |
 | `DOMAIN` | No | Canonical host or origin used as the CORS origin when `CORS_ORIGIN` is empty. | `api.example.com` |
+| `TRUST_PROXY` | No | Set to `true`, `1`, or `yes` when all traffic passes through one reverse proxy that overwrites `X-Forwarded-For`. Per-IP rate limits then use the client address from that header. Unset (default) uses the connection address, which behind a proxy means all clients share one bucket. | `true` |
 | `SES_CONFIGURATION_SET` | No | Account-wide SES configuration set attached to sends. Defaults to `waka-events`. | `waka-events` |
 | `SES_SNS_TOPIC_ARN` | No | If set, only signed SNS messages from this topic are accepted by the SES webhook. | `arn:aws:sns:us-east-1:123456789012:waka-events` |
 | `SENTRY_DSN` | No | Enables Sentry error reporting when non-empty. | `https://examplePublicKey@o0.ingest.sentry.io/0` |

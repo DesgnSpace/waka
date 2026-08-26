@@ -33,6 +33,7 @@ services:
       PORT: ${PORT:-3000}
       CORS_ORIGIN: ${CORS_ORIGIN:-}
       DOMAIN: ${DOMAIN:-}
+      TRUST_PROXY: ${TRUST_PROXY:-}
       SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-waka-events}
       SES_SNS_TOPIC_ARN: ${SES_SNS_TOPIC_ARN:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
