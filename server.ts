@@ -11,6 +11,7 @@ import * as h from "@/server/handlers";
 import { snsWebhook } from "@/server/webhooks";
 import * as ui from "@/server/ui";
 import { migrate } from "@/lib/migrate";
+import { purgeExpiredIdempotencyKeys } from "@/lib/idempotency";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -23,6 +24,19 @@ try {
   await Sentry.flush(2000);
   throw err;
 }
+
+// Delete expired idempotency keys hourly. Concurrent containers may run this
+// at once; a duplicate delete is harmless. Each pass schedules the next only
+// after it settles, so passes never overlap.
+const IDEMPOTENCY_PURGE_INTERVAL_MS = 60 * 60 * 1000;
+function scheduleIdempotencyPurge(): void {
+  setTimeout(() => {
+    purgeExpiredIdempotencyKeys()
+      .catch((err: unknown) => console.error("Failed to purge expired idempotency keys:", err))
+      .finally(scheduleIdempotencyPurge);
+  }, IDEMPOTENCY_PURGE_INTERVAL_MS);
+}
+scheduleIdempotencyPurge();
 
 // Drop-in replacement for the previous Next.js app: identical /api/* paths,
 // JSON shapes, auth, and env, plus an HTMX dashboard. Business logic is reused

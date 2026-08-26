@@ -34,6 +34,11 @@ import { query, type DbRow } from "@/lib/database";
 import { errorCode, errorHttpStatus, errorMessage, errorName } from "@/lib/errors";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 import { reserveDailySend } from "@/lib/quotas";
+import {
+  completeIdempotencyKey,
+  releaseIdempotencyKey,
+  reserveIdempotencyKey,
+} from "@/lib/idempotency";
 import { parseJsonArray, parseJsonObject } from "@/lib/serialization";
 
 type DomainIdRow = DbRow<{ id: string }>;
@@ -262,6 +267,30 @@ const MAX_TOTAL_ATTACHMENT_BYTES = 10 * 1024 * 1024; // SES raw-message hard lim
 const decodedBase64Bytes = (b64: string) =>
   Math.floor(b64.replace(/\s+/g, "").length * 0.75);
 
+const SEND_IN_PROGRESS =
+  "An email with this Idempotency-Key is still being processed. Wait a moment and retry.";
+
+function jsonResponse(data: unknown, status: number, extraHeaders: Record<string, string>): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json", ...extraHeaders },
+  });
+}
+
+// No header means no idempotency; a present but empty or oversized value is a
+// bad request rather than a silently ignored header.
+function idempotencyKeyOf(req: Req): string | null {
+  const header = req.headers.get("idempotency-key");
+  if (header === null) return null;
+  const key = header.trim();
+  if (!key || key.length > 255) {
+    throw new HttpError(400, {
+      error: "The Idempotency-Key header must be between 1 and 255 characters.",
+    });
+  }
+  return key;
+}
+
 // Extract the bare address from "Name <addr@host>" (or return it unchanged).
 function bareAddress(input: string): string {
   const m = input.match(/<([^>]+)>/);
@@ -336,6 +365,8 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
     return json({ error: "This API key can't send email. Create a key with send permission." }, 403);
   }
 
+  const idempotencyKey = idempotencyKeyOf(req);
+
   const { from, to, cc, bcc, subject, html, text, attachments, reply_to, tags } =
     sendEmailSchema.parse(await jsonBody(req));
 
@@ -347,57 +378,112 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
     return json({ error: `From email must use the domain ${domain.domain}.` }, 400);
   }
 
-  const sendRate = await checkRateLimit(`send:${apiKey.user_id}`, 60, 60_000);
-  const ipRate = await checkRateLimit(`send-ip:${requestAddress(req)}`, 20, 60_000);
-  if (!sendRate.allowed || !ipRate.allowed) {
-    throw new HttpError(429, { error: "Sending too quickly. Try again later." });
+  // Claimed before rate limits so a replay never consumes quota again.
+  let claim: { id: string } | null = null;
+  if (idempotencyKey) {
+    const reservation = await reserveIdempotencyKey(apiKey.id, idempotencyKey);
+    if (reservation.kind === "replay") {
+      return jsonResponse(reservation.body, reservation.status, {
+        "idempotency-replayed": "true",
+      });
+    }
+    if (reservation.kind === "conflict") {
+      return jsonResponse(
+        { error: SEND_IN_PROGRESS, message: SEND_IN_PROGRESS },
+        409,
+        { "retry-after": "1" }
+      );
+    }
+    claim = reservation;
   }
-  if (!(await reserveDailySend(apiKey.user_id))) {
-    throw new HttpError(429, { error: "Daily sending limit reached." });
-  }
 
-  const sesAttachments = attachments?.map((att) => ({
-    filename: att.filename,
-    content: att.content,
-    contentType: att.contentType || att.content_type || "application/octet-stream",
-  }));
-
-  // Persist attachment metadata only — never the raw base64 payload.
-  const attachmentMeta = (attachments ?? []).map((a) => ({
-    filename: a.filename,
-    contentType: a.contentType || a.content_type || "application/octet-stream",
-    size: decodedBase64Bytes(a.content),
-  }));
-
-  let messageId: string;
   try {
-    messageId = await sendEmail({
-      from,
-      to,
-      cc,
-      bcc,
-      subject,
-      html,
-      text,
-      attachments: sesAttachments,
-      replyTo: reply_to,
-      tags,
-    });
-  } catch (err) {
-    // Surface the provider's real reason (e.g. "Email address is not verified",
-    // "AccessDenied") instead of a blank 500, so the caller can act on it.
-    const name = errorName(err);
-    const reason = errorMessage(err);
-    const statusCode = errorHttpStatus(err) ?? 0;
-    console.error("SES send failed:", name, reason);
+    const sendRate = await checkRateLimit(`send:${apiKey.user_id}`, 60, 60_000);
+    const ipRate = await checkRateLimit(`send-ip:${requestAddress(req)}`, 20, 60_000);
+    if (!sendRate.allowed || !ipRate.allowed) {
+      throw new HttpError(429, { error: "Sending too quickly. Try again later." });
+    }
+    if (!(await reserveDailySend(apiKey.user_id))) {
+      throw new HttpError(429, { error: "Daily sending limit reached." });
+    }
 
-    const detail = reason || "Email provider rejected the message.";
+    const sesAttachments = attachments?.map((att) => ({
+      filename: att.filename,
+      content: att.content,
+      contentType: att.contentType || att.content_type || "application/octet-stream",
+    }));
+
+    // Persist attachment metadata only — never the raw base64 payload.
+    const attachmentMeta = (attachments ?? []).map((a) => ({
+      filename: a.filename,
+      contentType: a.contentType || a.content_type || "application/octet-stream",
+      size: decodedBase64Bytes(a.content),
+    }));
+
+    let messageId: string;
     try {
-      await query(
+      messageId = await sendEmail({
+        from,
+        to,
+        cc,
+        bcc,
+        subject,
+        html,
+        text,
+        attachments: sesAttachments,
+        replyTo: reply_to,
+        tags,
+      });
+    } catch (err) {
+      // Surface the provider's real reason (e.g. "Email address is not verified",
+      // "AccessDenied") instead of a blank 500, so the caller can act on it.
+      const name = errorName(err);
+      const reason = errorMessage(err);
+      const statusCode = errorHttpStatus(err) ?? 0;
+      console.error("SES send failed:", name, reason);
+
+      const detail = reason || "Email provider rejected the message.";
+      try {
+        await query(
+          `INSERT INTO email_logs (
+            api_key_id, domain_id, from_email, to_emails, cc_emails, bcc_emails,
+            subject, html_content, text_content, attachments, status, ses_message_id, error_message
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          [
+            apiKey.id,
+            domain.id,
+            from,
+            JSON.stringify(to),
+            JSON.stringify(cc || []),
+            JSON.stringify(bcc || []),
+            subject,
+            html,
+            text,
+            JSON.stringify(attachmentMeta),
+            "failed",
+            null,
+            name ? `${name}: ${detail}` : detail,
+          ]
+        );
+      } catch (logError) {
+        console.error("Failed to record rejected email:", logError);
+      }
+
+      const status = statusCode >= 400 && statusCode < 500 ? statusCode : 502;
+      throw new HttpError(status, {
+        error: detail,
+        message: detail,
+        code: name,
+      });
+    }
+
+    try {
+      const result = await query<{ id: string }>(
         `INSERT INTO email_logs (
           api_key_id, domain_id, from_email, to_emails, cc_emails, bcc_emails,
-          subject, html_content, text_content, attachments, status, ses_message_id, error_message
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+          subject, html_content, text_content, attachments, status, ses_message_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        RETURNING id`,
         [
           apiKey.id,
           domain.id,
@@ -409,58 +495,47 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
           html,
           text,
           JSON.stringify(attachmentMeta),
-          "failed",
-          null,
-          name ? `${name}: ${detail}` : detail,
+          "sent",
+          messageId,
         ]
       );
-    } catch (logError) {
-      console.error("Failed to record rejected email:", logError);
-    }
-
-    const status = statusCode >= 400 && statusCode < 500 ? statusCode : 502;
-    throw new HttpError(status, {
-      error: detail,
-      message: detail,
-      code: name,
-    });
-  }
-
-  try {
-    const result = await query<{ id: string }>(
-      `INSERT INTO email_logs (
-        api_key_id, domain_id, from_email, to_emails, cc_emails, bcc_emails,
-        subject, html_content, text_content, attachments, status, ses_message_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-      RETURNING id`,
-      [
-        apiKey.id,
-        domain.id,
+      const emailLogId = result.rows[0]?.id;
+      const body = {
+        id: emailLogId || messageId,
         from,
-        JSON.stringify(to),
-        JSON.stringify(cc || []),
-        JSON.stringify(bcc || []),
-        subject,
-        html,
-        text,
-        JSON.stringify(attachmentMeta),
-        "sent",
-        messageId,
-      ]
-    );
-    const emailLogId = result.rows[0]?.id;
-    return json({
-      id: emailLogId || messageId,
-      from,
-      to,
-      created_at: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error("Failed to record sent email:", error);
-    throw new HttpError(500, {
-      error: "Email sent but could not be recorded.",
-      message: "Email sent but could not be recorded.",
-    });
+        to,
+        created_at: new Date().toISOString(),
+      };
+      if (claim) {
+        await completeIdempotencyKey(claim.id, 200, body);
+        claim = null;
+      }
+      return json(body);
+    } catch (error) {
+      console.error("Failed to record sent email:", error);
+      if (claim) {
+        // The message was handed to SES, so the stored outcome must be
+        // success — otherwise a retry would send it a second time.
+        try {
+          await completeIdempotencyKey(claim.id, 200, {
+            id: messageId,
+            from,
+            to,
+            created_at: new Date().toISOString(),
+          });
+        } catch (completeError) {
+          console.error("Failed to store idempotent outcome:", completeError);
+        }
+        claim = null;
+      }
+      throw new HttpError(500, {
+        error: "Email sent but could not be recorded.",
+        message: "Email sent but could not be recorded.",
+      });
+    }
+  } catch (err) {
+    if (claim) await releaseIdempotencyKey(claim.id);
+    throw err;
   }
 }
 

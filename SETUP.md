@@ -136,6 +136,8 @@ curl -X POST http://localhost:3000/api/emails \
 
 The `from` domain must match the verified domain attached to the API key. In SES sandbox mode, the recipient must also be verified.
 
+To make client retries safe, send an `Idempotency-Key` header with a unique value per message; see [README.md](README.md).
+
 ## Troubleshooting
 
 - `DATABASE_URL` errors: check that PostgreSQL is running and that the database exists.

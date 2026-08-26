@@ -58,6 +58,17 @@ curl -X POST https://your-host.example/api/emails \
 
 The Resend Node.js SDK can use the same API key when its base URL is set to `https://your-host.example/api`.
 
+## Retry safety
+
+Send an `Idempotency-Key` header with `POST /api/emails` to make client retries safe. Use a unique value per message (up to 255 characters) and resend it unchanged if a request times out or the response is lost.
+
+- While the first request with a key is still running, repeats get `409 Conflict`. Wait briefly and retry.
+- Once it finishes, repeats return the original status and body instead of sending again.
+- If the first attempt was rejected before SES accepted it, the key is released and a retry sends normally.
+- Keys are scoped to the API key that sent them and expire after 24 hours.
+
+Requests without an `Idempotency-Key` are unaffected.
+
 ## Routes
 
 - `GET /api/health`
