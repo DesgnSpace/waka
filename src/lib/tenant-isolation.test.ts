@@ -115,7 +115,7 @@ installFakeDatabase("./database");
 
 const { getDomainById } = await import("./domains");
 const { generateJWT } = await import("./auth");
-const { getEmail, usage } = await import("@/server/handlers");
+const { getEmail, usage, emailLogs } = await import("@/server/handlers");
 
 beforeEach(() => {
   executedQueries.length = 0;
@@ -387,4 +387,92 @@ test("usage defaults to 30 days when no range is given", async () => {
 test("usage requires authentication", async () => {
   const res = await usage(usageRequest(undefined, "2026-01-01", "2026-01-02"));
   expect(res.status).toBe(401);
+});
+
+// --- email logs filtering isolation (item 15) ---
+
+function logsRequest(token: string, qs: string): Req {
+  const request = new Request(`http://localhost/api/emails/logs${qs}`, {
+    headers: { authorization: `Bearer ${token}` },
+  }) as Req;
+  request.params = {};
+  return request;
+}
+
+function logCountQueries() {
+  return executedQueries.filter((q) => q.sql.includes("COUNT(*) as count") && q.sql.includes("FROM email_logs el"));
+}
+
+test("email logs: recipient filter does not leak another domain's rows", async () => {
+  onFakeQuery((sql, params = []) => {
+    if (sql.includes("COUNT(*) as count") && sql.includes("FROM email_logs el")) {
+      // only params[0] domainIds and params[1] user determine isolation; fake returns 0 for foreign
+      const domainIds = params[0] as string[];
+      const userId = params[1] as string;
+      const recipient = params.find((p) => typeof p === "string" && String(p).includes("@")) as string | undefined;
+      if (userId === accountA && domainIds[0] === domainA && recipient === "other@example.com") {
+        return { rows: [{ count: "0" }], rowCount: 1 };
+      }
+      return { rows: [{ count: "0" }], rowCount: 1 };
+    }
+    if (sql.includes("FROM email_logs el") && (sql.includes("LIMIT") || sql.includes("ORDER BY"))) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (sql.includes("FROM domains")) {
+      const userId = (params[1] as string | undefined) ?? (params[0] as string);
+      if (userId === accountA) return { rows: [{ id: domainA }], rowCount: 1 };
+      if (userId === accountB) return { rows: [{ id: domainB }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+  const tokenA = generateJWT({ id: accountA, email: "a@example.com" });
+  const res = await emailLogs(logsRequest(tokenA, "?recipient=other@example.com"));
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.data.emails).toEqual([]);
+  const q = logCountQueries()[0];
+  expect(q.params[0]).toEqual([domainA]);
+  expect(q.params[1]).toBe(accountA);
+});
+
+test("email logs: combined recipient+subject+date+messageId filters stay scoped", async () => {
+  const tokenA = generateJWT({ id: accountA, email: "a@example.com" });
+  // reuse same fake: return empty for isolation check
+  onFakeQuery((sql, params = []) => {
+    if (sql.includes("COUNT(*) as count")) return { rows: [{ count: "0" }], rowCount: 1 };
+    if (sql.includes("FROM email_logs el")) return { rows: [], rowCount: 0 };
+    if (sql.includes("FROM domains")) {
+      const userId = (params[1] as string | undefined) ?? (params[0] as string);
+      if (userId === accountA) return { rows: [{ id: domainA }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+  const qs = new URLSearchParams({ recipient: "bob@example.com", subject: "Invoice", from: "2026-01-01", to: "2026-01-31", message_id: domainB }).toString();
+  const res = await emailLogs(logsRequest(tokenA, `?${qs}`));
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.data.emails).toEqual([]);
+  const q = logCountQueries()[0];
+  expect(q.sql).toContain("recipient_search LIKE");
+  expect(q.sql).toContain("lower(el.subject) LIKE");
+  expect(q.sql).toContain("el.created_at >=");
+  expect(q.sql).toContain("el.id::text =");
+  expect(q.params[0]).toEqual([domainA]);
+});
+
+test("email logs: API key with any filter cannot read other domain", async () => {
+  onFakeQuery((sql, params = []) => {
+    if (sql.includes("COUNT(*) as count")) return { rows: [{ count: "0" }], rowCount: 1 };
+    if (sql.includes("FROM email_logs el")) return { rows: [], rowCount: 0 };
+    return { rows: [], rowCount: 0 };
+  });
+  const res = await emailLogs(logsRequest(keySendToken, "?recipient=any@example.com&subject=Hello&from=2026-01-01&to=2026-12-31&message_id=some-id"));
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.data.emails).toEqual([]);
+  const q = logCountQueries()[0];
+  expect(q.params[0]).toEqual([domainA]);
+  expect(q.params[1]).toBe(accountA);
 });

@@ -36,6 +36,7 @@ import { errorCode, errorHttpStatus, errorMessage, errorName } from "@/lib/error
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 import { reserveDailySend } from "@/lib/quotas";
 import { parseJsonArray, parseJsonObject } from "@/lib/serialization";
+import { searchEmailLogs } from "@/lib/email-logs";
 
 type DomainIdRow = DbRow<{ id: string }>;
 type EmailLogRow = DbRow<{
@@ -494,14 +495,37 @@ export async function emailLogs(req: Req): Promise<Response> {
   }
 
   const url = new URL(req.url);
-  const params = z.object({
+  const raw = Object.fromEntries(url.searchParams.entries());
+  const allowedStatus = ["pending", "sent", "failed", "delivered", "bounced", "complained"] as const;
+  const paginated = z.object({
     page: z.coerce.number().int().min(1).max(10_000).default(1),
     limit: z.coerce.number().int().min(1).max(100).default(50),
     domain_id: z.string().uuid().optional(),
-    status: z.enum(["pending", "sent", "failed", "delivered", "bounced", "complained"]).optional(),
-  }).parse(Object.fromEntries(url.searchParams));
-  const { page, limit, domain_id: domainId, status } = params;
+    status: z.enum(allowedStatus).optional(),
+    recipient: z.string().max(320).optional(),
+    subject: z.string().max(500).optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
+    from_date: z.string().optional(),
+    to_date: z.string().optional(),
+    start_date: z.string().optional(),
+    end_date: z.string().optional(),
+    message_id: z.string().max(255).optional(),
+    messageId: z.string().max(255).optional(),
+  }).parse(raw);
+
+  const page = paginated.page;
+  const limit = paginated.limit;
   const offset = (page - 1) * limit;
+
+  const recipient = (paginated.recipient ?? "").trim() || undefined;
+  const subject = (paginated.subject ?? "").trim() || undefined;
+  const fromDate = (paginated.from ?? paginated.from_date ?? paginated.start_date ?? "").trim() || undefined;
+  const toDate = (paginated.to ?? paginated.to_date ?? paginated.end_date ?? "").trim() || undefined;
+  const messageId = (paginated.message_id ?? paginated.messageId ?? "").trim() || undefined;
+
+  if (fromDate && isNaN(Date.parse(fromDate))) throw new HttpError(400, { error: "Invalid from date. Use ISO 8601." });
+  if (toDate && isNaN(Date.parse(toDate))) throw new HttpError(400, { error: "Invalid to date. Use ISO 8601." });
 
   let domainIds: string[] = [];
   let scopedUserId: string | null = null;
@@ -523,46 +547,22 @@ export async function emailLogs(req: Req): Promise<Response> {
     });
   }
 
-  const queryParams: (string | string[] | number | null)[] = [
+  const toIsoEnd = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T23:59:59.999Z`).toISOString() : new Date(v).toISOString();
+  const { logs: emails, total: totalCount } = await searchEmailLogs({
     domainIds,
-    domainId ?? null,
-    status ?? null,
-    scopedUserId,
-  ];
-
-  const countResult = await query<EmailCountRow>(
-    `SELECT COUNT(*) as count FROM email_logs el
-     WHERE el.domain_id = ANY($1)
-       AND ($2::uuid IS NULL OR el.domain_id = $2)
-       AND ($3::text IS NULL OR el.status = $3)
-       AND EXISTS (SELECT 1 FROM domains d WHERE d.id = el.domain_id AND d.user_id = $4)`,
-    queryParams
-  );
-  const totalCount = parseInt(countResult.rows[0].count);
-
-  const emailLogsResult = await query<EmailLogRow>(
-     `SELECT el.*, d.domain as domain_name, ak.key_name as api_key_name
-      FROM email_logs el
-      JOIN domains d ON el.domain_id = d.id AND d.user_id = $4
-     LEFT JOIN api_keys ak ON el.api_key_id = ak.id
-       AND ak.user_id = d.user_id AND ak.domain_id = el.domain_id
-     WHERE el.domain_id = ANY($1)
-       AND ($2::uuid IS NULL OR el.domain_id = $2)
-       AND ($3::text IS NULL OR el.status = $3)
-     ORDER BY el.created_at DESC
-     LIMIT $5 OFFSET $6`,
-     [...queryParams, limit, offset]
-  );
-
-  const emails = emailLogsResult.rows.map((row) => ({
-    ...row,
-    to_emails: parseJsonArray(row.to_emails, "to_emails"),
-    cc_emails: parseJsonArray(row.cc_emails, "cc_emails"),
-    bcc_emails: parseJsonArray(row.bcc_emails, "bcc_emails"),
-    attachments: parseJsonArray(row.attachments, "attachments"),
-    domains: row.domain_name ? { domain: row.domain_name } : null,
-    api_keys: row.api_key_name ? { key_name: row.api_key_name } : null,
-  }));
+    scopedUserId: scopedUserId!,
+    filters: {
+      domainId: paginated.domain_id ?? null,
+      status: paginated.status ?? null,
+      recipient: recipient ?? null,
+      subject: subject ?? null,
+      fromDate: fromDate ? new Date(fromDate).toISOString() : null,
+      toDate: toDate ? toIsoEnd(toDate) : null,
+      messageId: messageId ?? null,
+    },
+    limit,
+    offset,
+  });
 
   return json({
     success: true,
