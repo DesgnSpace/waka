@@ -137,6 +137,8 @@ curl -X POST http://localhost:3000/api/emails \
 
 The `from` domain must match the verified domain attached to the API key. In SES sandbox mode, the recipient must also be verified.
 
+To send later instead of now, add `scheduled_at` to the same request with an ISO 8601 timestamp or a relative offset like `in 30 minutes` (72 hours maximum). Waka stores the message, replies with its `id` immediately, and a background worker delivers it within a minute of that time. Failed deliveries retry up to 5 times before the status becomes `failed`. The daily quota counts the message when it is scheduled, not when it is sent.
+
 ## Troubleshooting
 
 - `DATABASE_URL` errors: check that PostgreSQL is running and that the database exists.

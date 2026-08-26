@@ -58,6 +58,25 @@ curl -X POST https://your-host.example/api/emails \
 
 The Resend Node.js SDK can use the same API key when its base URL is set to `https://your-host.example/api`.
 
+### Scheduled sending
+
+Add `scheduled_at` to the same request to have Waka deliver the email later. Accepts an ISO 8601 timestamp (include `Z` or a UTC offset) or a relative offset like `in 30 minutes`, at most 72 hours ahead:
+
+```bash
+curl -X POST https://your-host.example/api/emails \
+  -H "Authorization: Bearer wka_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "from": "hello@example.com",
+    "to": ["recipient@example.com"],
+    "subject": "Later",
+    "text": "This arrives at the scheduled time.",
+    "scheduled_at": "2026-09-01T09:00:00Z"
+  }'
+```
+
+The response returns the same `id` shape as an immediate send, right away. A worker picks up the message within a minute of its send time; until then it has status `scheduled` and appears in `GET /api/emails/logs?status=scheduled`. The daily quota counts a scheduled message when it is submitted. A message whose delivery fails retries up to 5 times, 5 minutes apart, before its status becomes `failed` permanently.
+
 ## Routes
 
 - `GET /api/health`

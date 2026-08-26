@@ -12,6 +12,7 @@ import { snsWebhook } from "@/server/webhooks";
 import * as ui from "@/server/ui";
 import { migrate } from "@/lib/migrate";
 import { startPruneJob } from "@/lib/prune";
+import { startScheduledSendJob } from "@/lib/scheduled-sends";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -27,6 +28,9 @@ try {
 
 // Nightly retention job: clears old email bodies and raw webhook payloads.
 startPruneJob();
+
+// Minute-by-minute worker: delivers emails scheduled for a future send time.
+startScheduledSendJob();
 
 // Drop-in replacement for the previous Next.js app: identical /api/* paths,
 // JSON shapes, auth, and env, plus an HTMX dashboard. Business logic is reused
