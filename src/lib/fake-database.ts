@@ -26,10 +26,16 @@ export async function fakeQuery(sql: string, params: unknown[] = []): Promise<Fa
 // bun's mock.module is process-global and keyed by resolved path, so every
 // suite that fakes the database must register this same module object instead
 // of its own factory; per-suite behavior goes through onFakeQuery.
+export async function fakeTransaction<T>(cb: (client: { query: typeof fakeQuery }) => Promise<T>): Promise<T> {
+  return cb({ query: fakeQuery });
+}
+
+const fakePool = { connect: async () => ({ query: fakeQuery, release: () => {} }) };
 export const fakeDatabase = {
   query: fakeQuery,
-  transaction: <T>(callback: (client: { query: typeof fakeQuery }) => Promise<T>): Promise<T> =>
-    callback({ query: fakeQuery }),
+  transaction: fakeTransaction,
+  pool: fakePool,
+  db: fakePool,
 };
 
 export function installFakeDatabase(specifier: string): void {

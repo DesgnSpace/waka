@@ -25,6 +25,7 @@ import { getDomainApiKeys, generateApiKey, deleteApiKey } from "@/lib/api-keys";
 import { sendEmail } from "@/lib/ses";
 import { query } from "@/lib/database";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
+import { reserveDailySend } from "@/lib/quotas";
 
 // --- helpers -----------------------------------------------------------------
 
@@ -115,6 +116,8 @@ const FLASH: Record<string, { kind: "ok" | "err" | "mut"; text: string }> = {
   "test-pending": { kind: "mut", text: "Verify this domain before sending a test email." },
   "test-log-failed": { kind: "mut", text: "The test email was accepted, but its activity could not be recorded. Ask the administrator to check the database." },
   "test-sent": { kind: "ok", text: "Test email accepted. Delivery updates appear in email activity." },
+  "test-rate-limited": { kind: "err", text: "Too many test emails. Wait a moment and try again." },
+  "test-daily-limited": { kind: "err", text: "Daily sending limit reached. Try again tomorrow." },
   "verify-failed": { kind: "err", text: "We could not check DNS right now. Try again in a moment." },
   "domain-required": { kind: "err", text: "Enter a domain such as example.com." },
   "domain-invalid": { kind: "err", text: "That does not look like a domain. Enter a name such as example.com and try again." },
@@ -983,19 +986,28 @@ function domainKeysView(
 ): string {
   const rows = keys
     .map(
-      (k) => `<tr>
+      (k) => {
+        const limits: string[] = [];
+        if (k.rate_limit_per_minute != null) limits.push(`${k.rate_limit_per_minute}/min`);
+        if (k.daily_send_limit != null) limits.push(`${k.daily_send_limit}/day`);
+        const limitLabel = limits.length ? limits.join(" · ") : "—";
+        return `<tr>
         <td class="t-name">${esc(k.key_name)}</td>
         <td><code>${esc(k.key_prefix)}…</code></td>
         <td class="t-mut">${esc((k.permissions ?? []).map((permission) => permission === "send" ? "send email" : permission).join(", "))}</td>
+        <td class="t-mut">${esc(limitLabel)}</td>
         <td class="t-mut">${formatDate(k.created_at)}</td>
         <td class="right">${actionForm(`/ui/domains/${esc(domain.id)}/keys/${esc(k.id)}/delete`, "revoke", "act danger", `Revoke ${k.key_name}? Apps using it stop working.`)}</td>
-      </tr>`
+      </tr>`;
+      }
     )
     .join("");
   const form =
     domain.status === "verified"
        ? `<form class="toolbar" method="post" action="/ui/domains/${esc(domain.id)}/keys" hx-confirm="Create an API key for this domain?">
            <label><span>Key name</span><input name="keyName" placeholder="local development" required></label>
+           <label><span>Per-minute limit</span><input name="rateLimitPerMinute" type="number" min="1" max="1000000" placeholder="60"></label>
+           <label><span>Daily limit</span><input name="dailySendLimit" type="number" min="1" max="1000000" placeholder="1000"></label>
            <button type="submit" class="btn" data-loading-label="creating...">create API key</button>
          </form>`
        : alert("mut", "Verify this domain first. The API key form will appear here when it is ready.");
@@ -1010,16 +1022,25 @@ function domainKeysView(
   return `${banner}${form}
   ${testEmail}
   <div class="table-wrap"><table>
-    <thead><tr><th>name</th><th>key starts with</th><th>access</th><th>created</th><th class="right">actions</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="5">${emptyState("No API keys yet", domain.status === "verified" ? "Create your first key to send email from this domain." : "Verify this domain before creating an API key.")}</td></tr>`}</tbody>
+    <thead><tr><th>name</th><th>key starts with</th><th>access</th><th>limits</th><th>created</th><th class="right">actions</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="6">${emptyState("No API keys yet", domain.status === "verified" ? "Create your first key to send email from this domain." : "Verify this domain before creating an API key.")}</td></tr>`}</tbody>
   </table></div>`;
 }
 
-async function sendTestEmail(domain: DomainRow, recipient: string): Promise<Response> {
+async function sendTestEmail(req: Req, domain: DomainRow, recipient: string, user: AuthUser): Promise<Response> {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
     return seeOther(`/ui/domains/${domain.id}?m=test-recipient`);
   }
   if (domain.status !== "verified") return seeOther(`/ui/domains/${domain.id}?m=test-pending`);
+
+  const ipRate = await checkRateLimit(`send-ip:${requestAddress(req)}`, 20, 60_000);
+  const userRate = await checkRateLimit(`send:${user.id}`, 60, 60_000);
+  if (!ipRate.allowed || !userRate.allowed) {
+    return seeOther(`/ui/domains/${domain.id}?m=test-rate-limited`);
+  }
+  if (!(await reserveDailySend(user.id))) {
+    return seeOther(`/ui/domains/${domain.id}?m=test-daily-limited`);
+  }
 
   const from = `test@${domain.domain}`;
   const subject = `Test email from ${domain.domain}`;
@@ -1095,15 +1116,37 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
   const form = await csrfForm(req);
   if (!form) return forbidden();
   if (form.has("to")) {
-    return sendTestEmail(domain, String(form.get("to") ?? "").trim());
+    return sendTestEmail(req as Req, domain, String(form.get("to") ?? "").trim(), user);
   }
   const keyName = String(form.get("keyName") ?? "").trim().slice(0, 255);
+  const parseLimit = (v: FormDataEntryValue | null): number | null => {
+    if (v == null) return null;
+    const s = String(v).trim();
+    if (!s) return null;
+    const n = Number(s);
+    if (!Number.isInteger(n) || n < 1 || n > 1_000_000) throw new Error("invalid limit");
+    return n;
+  };
+  let rateLimitPerMinute: number | null = null;
+  let dailySendLimit: number | null = null;
+  try {
+    rateLimitPerMinute = parseLimit(form.get("rateLimitPerMinute"));
+    dailySendLimit = parseLimit(form.get("dailySendLimit"));
+  } catch {
+    let keys: DomainKeys;
+    try {
+      keys = await getDomainApiKeys(domain.id, user.id);
+    } catch {
+      keys = [] as unknown as DomainKeys;
+    }
+    return renderPage(req as Req, `${domain.domain} keys`, keysBody(domain, keys, alert("err", "Limits must be positive whole numbers." )), user, { status: 400 });
+  }
   let banner = "";
   try {
     if (domain.status !== "verified") banner = alert("err", "Domain must be verified first.");
     else if (!keyName) banner = alert("err", "Key name is required.");
     else {
-      const created = await generateApiKey(user.id, domain.id, keyName);
+      const created = await generateApiKey(user.id, domain.id, keyName, ["send"], { rateLimitPerMinute, dailySendLimit });
       banner = `<div class="block" role="status">
         <div class="block-title">Your API key is ready</div>
         <p class="key-warning">Copy it now. For your security, this full key will not be shown again.</p>

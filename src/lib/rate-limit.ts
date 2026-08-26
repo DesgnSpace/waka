@@ -1,6 +1,6 @@
 import type { Server } from "bun";
 
-import { transaction } from "./database";
+import { db, query, transaction } from "./database";
 
 export async function checkRateLimit(
   key: string,
@@ -42,6 +42,27 @@ export async function checkRateLimit(
   };
 }
 
+const RATE_LIMIT_PURGE_LOCK_KEY = 724_243;
+
+export async function purgeExpiredRateLimitBuckets(): Promise<void> {
+  const client = await db.connect();
+  try {
+    const lock = await client.query("SELECT pg_try_advisory_lock($1) AS acquired", [
+      RATE_LIMIT_PURGE_LOCK_KEY,
+    ]);
+    if (!lock.rows[0]?.acquired) return;
+    try {
+      await client.query(
+        "DELETE FROM rate_limit_buckets WHERE window_started_at < NOW() - INTERVAL '1 day'",
+      );
+    } finally {
+      await client.query("SELECT pg_advisory_unlock($1)", [RATE_LIMIT_PURGE_LOCK_KEY]);
+    }
+  } finally {
+    client.release();
+  }
+}
+
 // Set once after Bun.serve() so requestAddress can read the socket address.
 let bunServer: Server<undefined> | null = null;
 
@@ -64,8 +85,6 @@ function proxyTrusted(): boolean {
 }
 
 function firstForwardedValue(value: string): string {
-  // With one trusted proxy the leftmost entry is the originating client;
-  // every later entry was appended by a proxy and is attacker-writable.
   return value.split(",")[0].trim();
 }
 
