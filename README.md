@@ -19,10 +19,12 @@ Edit `.env` and replace the placeholder values. Then run:
 ```bash
 docker compose up --build -d
 curl http://localhost:3000/api/health
-curl -X POST http://localhost:3000/api/setup
+curl -X POST http://localhost:3000/api/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com", "password": "a-password-of-12-plus-characters"}'
 ```
 
-Open `http://localhost:3000` and sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. The full ordered setup, including PostgreSQL, is in [SETUP.md](SETUP.md). Use [DEPLOYMENT.md](DEPLOYMENT.md) for production Docker Compose deployment.
+Open `http://localhost:3000` and sign in with the email and password you signed up with. The full ordered setup, including PostgreSQL, is in [SETUP.md](SETUP.md). Use [DEPLOYMENT.md](DEPLOYMENT.md) for production Docker Compose deployment.
 
 ## What happens next
 
@@ -80,8 +82,8 @@ The response returns the same `id` shape as an immediate send, right away. A wor
 ## Routes
 
 - `GET /api/health`
-- `POST /api/setup`
 - `POST /api/auth/login`
+- `POST /api/auth/signup`
 - `GET /api/auth/me`
 - `GET|POST /api/domains`
 - `GET|DELETE /api/domains/:id`

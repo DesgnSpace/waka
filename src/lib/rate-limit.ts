@@ -1,3 +1,5 @@
+import type { Server } from "bun";
+
 import { transaction } from "./database";
 
 export async function checkRateLimit(
@@ -40,8 +42,39 @@ export async function checkRateLimit(
   };
 }
 
+// Set once after Bun.serve() so requestAddress can read the socket address.
+let bunServer: Server<undefined> | null = null;
+
+export function bindServer(server: Server<undefined>): void {
+  bunServer = server;
+}
+
+function peerAddress(req: Request): string | null {
+  try {
+    return bunServer?.requestIP(req)?.address ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const TRUST_PROXY_VALUES = new Set(["1", "true", "yes"]);
+
+function proxyTrusted(): boolean {
+  return TRUST_PROXY_VALUES.has((process.env.TRUST_PROXY ?? "").trim().toLowerCase());
+}
+
+function firstForwardedValue(value: string): string {
+  // With one trusted proxy the leftmost entry is the originating client;
+  // every later entry was appended by a proxy and is attacker-writable.
+  return value.split(",")[0].trim();
+}
+
 export function requestAddress(req: Request): string {
-  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const address = forwarded || req.headers.get("x-real-ip")?.trim();
-  return (address || "unknown").slice(0, 128);
+  if (proxyTrusted()) {
+    const forwarded = req.headers.get("x-forwarded-for");
+    const client = forwarded ? firstForwardedValue(forwarded) : "";
+    const address = client || req.headers.get("x-real-ip")?.trim() || peerAddress(req) || "unknown";
+    return address.slice(0, 128);
+  }
+  return (peerAddress(req) || "unknown").slice(0, 128);
 }

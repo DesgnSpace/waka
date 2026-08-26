@@ -13,6 +13,7 @@ import * as ui from "@/server/ui";
 import { migrate } from "@/lib/migrate";
 import { startPruneJob } from "@/lib/prune";
 import { startScheduledSendJob } from "@/lib/scheduled-sends";
+import { bindServer } from "@/lib/rate-limit";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -41,7 +42,6 @@ const server = Bun.serve({
   routes: {
     // --- JSON API (Resend-compatible + dashboard backend) ---
     "/api/health": methods({ GET: h.health }),
-    "/api/setup": methods({ POST: h.setup }),
     "/api/auth/login": methods({ POST: h.login }),
     "/api/auth/signup": methods({ POST: h.signup }),
     "/api/auth/me": methods({ GET: h.me }),
@@ -82,3 +82,4 @@ const server = Bun.serve({
 });
 
 console.log(`waka listening on http://${server.hostname}:${server.port}`);
+bindServer(server);

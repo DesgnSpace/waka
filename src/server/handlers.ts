@@ -30,7 +30,8 @@ import {
   normalizeDkimSelector,
   normalizeDomain,
 } from "@/lib/email-dns-readiness";
-import { query, type DbRow } from "@/lib/database";
+import { query, transaction, type DbRow } from "@/lib/database";
+import { createHealthChecker } from "@/lib/health-check";
 import { errorCode, errorHttpStatus, errorMessage, errorName } from "@/lib/errors";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 import { reserveDailySend } from "@/lib/quotas";
@@ -70,20 +71,14 @@ type WebhookEventRow = DbRow<{
 }>;
 
 // ----------------------------------------------------------------------------
-// health + setup
+// health
 // ----------------------------------------------------------------------------
 
-export function health(): Response {
-  return json({
-    status: "healthy",
-    timestamp: new Date().toISOString(),
-    service: "Waka",
-    version: "1.0.0",
-  });
-}
+const healthChecks = createHealthChecker((run) => transaction((client) => run(client)));
 
-export async function setup(): Promise<Response> {
-  throw new HttpError(404, { error: "Not found" });
+export async function health(): Promise<Response> {
+  const report = await healthChecks.report();
+  return json(report, report.status === "healthy" ? 200 : 503);
 }
 
 // ----------------------------------------------------------------------------
@@ -426,10 +421,38 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
     const reason = errorMessage(err);
     const statusCode = errorHttpStatus(err) ?? 0;
     console.error("SES send failed:", name, reason);
+
+    const detail = reason || "Email provider rejected the message.";
+    try {
+      await query(
+        `INSERT INTO email_logs (
+          api_key_id, domain_id, from_email, to_emails, cc_emails, bcc_emails,
+          subject, html_content, text_content, attachments, status, ses_message_id, error_message
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [
+          apiKey.id,
+          domain.id,
+          from,
+          JSON.stringify(to),
+          JSON.stringify(cc || []),
+          JSON.stringify(bcc || []),
+          subject,
+          html,
+          text,
+          JSON.stringify(attachmentMeta),
+          "failed",
+          null,
+          name ? `${name}: ${detail}` : detail,
+        ]
+      );
+    } catch (logError) {
+      console.error("Failed to record rejected email:", logError);
+    }
+
     const status = statusCode >= 400 && statusCode < 500 ? statusCode : 502;
     throw new HttpError(status, {
-      error: reason || "Email provider rejected the message.",
-      message: reason || "Email provider rejected the message.",
+      error: detail,
+      message: detail,
       code: name,
     });
   }

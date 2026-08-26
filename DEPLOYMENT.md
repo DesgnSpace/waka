@@ -32,6 +32,7 @@ Read [SETUP.md](SETUP.md) for the environment variable table, SES permissions, S
 For production:
 
 - Publish port `3000` through an HTTPS reverse proxy or load balancer.
+- When a single reverse proxy terminates TLS and overwrites `X-Forwarded-For`, set `TRUST_PROXY=true` so per-IP rate limits key on the real client address. Without it, all proxied clients share one limit bucket.
 - Use a strong `NEXTAUTH_SECRET` and a strong PostgreSQL password.
 - Use `NODE_ENV=production` so the dashboard cookie is marked `Secure`.
 - Set `DATABASE_SSL=require` when the database endpoint requires verified TLS.
