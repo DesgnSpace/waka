@@ -13,7 +13,9 @@ const sesMessageSchema = z.object({
     destination: z.array(z.string()),
   }),
   bounce: z.object({
-    bouncedRecipients: z.array(z.object({ emailAddress: z.string(), diagnosticCode: z.string() })),
+    bounceType: z.string().optional(),
+    bounceSubType: z.string().optional(),
+    bouncedRecipients: z.array(z.object({ emailAddress: z.string(), diagnosticCode: z.string().optional() })),
   }).optional(),
   complaint: z.object({ complainedRecipients: z.array(z.object({ emailAddress: z.string() })) }).optional(),
   open: z.object({ timestamp: z.string().optional(), ipAddress: z.string().optional(), userAgent: z.string().optional() }).optional(),
@@ -45,6 +47,7 @@ async function processSESEvent(message: SESMessage): Promise<void> {
   await transaction(async (client) => {
     const emailResult = await client.query<{
       id: string;
+      domain_id: string;
       status: string;
     }>(
       `SELECT el.id, el.domain_id, el.status
@@ -111,6 +114,32 @@ async function processSESEvent(message: SESMessage): Promise<void> {
       "INSERT INTO webhook_events (email_log_id, event_type, event_data, processed) VALUES ($1, $2, $3, $4)",
       [emailLog.id, eventType, eventData, true]
     );
+
+    // Suppressions are per-domain and idempotent. Only permanent bounces and
+    // complaints are recorded; transient bounces are ignored so a full mailbox
+    // does not block future mail.
+    if (eventType === "bounce") {
+      const bounceType = message.bounce?.bounceType?.toLowerCase();
+      if (bounceType === "permanent") {
+        const recipients = message.bounce?.bouncedRecipients ?? [];
+        for (const r of recipients) {
+          if (!r.emailAddress) continue;
+          await client.query(
+            `INSERT INTO suppressions (domain_id, email, reason) VALUES ($1, LOWER($2), 'bounce') ON CONFLICT DO NOTHING`,
+            [emailLog.domain_id, r.emailAddress.trim().toLowerCase()],
+          );
+        }
+      }
+    } else if (eventType === "complaint") {
+      const recipients = message.complaint?.complainedRecipients ?? [];
+      for (const r of recipients) {
+        if (!r.emailAddress) continue;
+        await client.query(
+          `INSERT INTO suppressions (domain_id, email, reason) VALUES ($1, LOWER($2), 'complaint') ON CONFLICT DO NOTHING`,
+          [emailLog.domain_id, r.emailAddress.trim().toLowerCase()],
+        );
+      }
+    }
   });
 }
 

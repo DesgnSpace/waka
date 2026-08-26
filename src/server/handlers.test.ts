@@ -95,6 +95,7 @@ beforeEach(() => {
   sendEmail.mockClear();
   executedQueries.length = 0;
   onFakeQuery((sql, params = []) => {
+    if (sql.includes("FROM suppressions")) return { rows: [], rowCount: 0 };
     if (sql.includes("FROM domains")) {
       return params[0] === domainId && params[1] === userId
         ? { rows: [domainRow], rowCount: 1 }
@@ -275,11 +276,13 @@ function idempotencyStore() {
 
   const route = (sql: string, params: unknown[] = []): FakeQueryResult =>
     impl(sql, params) ??
-    (sql.includes("FROM domains")
-      ? params[0] === domainId && params[1] === userId
-        ? { rows: [domainRow], rowCount: 1 }
-        : { rows: [], rowCount: 0 }
-      : { rows: [{ id: logId }], rowCount: 1 });
+    (sql.includes("FROM suppressions")
+      ? { rows: [], rowCount: 0 }
+      : sql.includes("FROM domains")
+        ? params[0] === domainId && params[1] === userId
+          ? { rows: [domainRow], rowCount: 1 }
+          : { rows: [], rowCount: 0 }
+        : { rows: [{ id: logId }], rowCount: 1 });
 
   return { rows, releasedIds, route };
 }

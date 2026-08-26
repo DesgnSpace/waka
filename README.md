@@ -69,6 +69,14 @@ Send an `Idempotency-Key` header with `POST /api/emails` to make client retries 
 
 Requests without an `Idempotency-Key` are unaffected.
 
+## Suppressions
+
+Addresses that permanently bounced or were marked as spam are blocked per domain. The SES webhook records them automatically; later sends to the same address on that domain are refused before any quota or rate-limit is consumed. Transient bounces (for example, a full mailbox) are not blocked.
+
+- A send is checked against `to`, `cc`, and `bcc`. If any recipient is suppressed the entire request is rejected with `400` and a list of the blocked addresses. Remove those addresses or clear them from the suppression list and send again.
+- Suppressions are scoped to the sending domain. One domain's blocks never affect another, even for the same recipient address.
+- Manage them per domain: `GET /api/domains/:id/suppressions` lists blocked addresses, `DELETE /api/domains/:id/suppressions/:email` removes one.
+
 ## Routes
 
 - `GET /api/health`
@@ -78,6 +86,8 @@ Requests without an `Idempotency-Key` are unaffected.
 - `GET|POST /api/domains`
 - `GET|DELETE /api/domains/:id`
 - `POST /api/domains/:id/verify`
+- `GET /api/domains/:id/suppressions`
+- `DELETE /api/domains/:id/suppressions/:email`
 - `GET|POST /api/api-keys`
 - `PUT|DELETE /api/api-keys/:id`
 - `POST /api/emails`

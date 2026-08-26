@@ -40,6 +40,7 @@ import {
   reserveIdempotencyKey,
 } from "@/lib/idempotency";
 import { parseJsonArray, parseJsonObject } from "@/lib/serialization";
+import { findSuppressed, listSuppressions, removeSuppression } from "@/lib/suppression";
 
 type DomainIdRow = DbRow<{ id: string }>;
 type EmailLogRow = DbRow<{
@@ -202,6 +203,30 @@ export async function verifyDomain(req: Req): Promise<Response> {
         ? "Domain verified."
         : "Domain verification is pending. Check DNS records and try again.",
   });
+}
+
+export async function listSuppressionsHandler(req: Req): Promise<Response> {
+  const user = requireUser(req);
+  const domainId = pathUuid(req);
+  const domain = await getDomainById(domainId, user.id);
+  if (!domain) return json({ error: "Domain not found" }, 404);
+  const suppressions = await listSuppressions(domainId);
+  return json({ success: true, data: { suppressions } });
+}
+
+export async function removeSuppressionHandler(req: Req): Promise<Response> {
+  const user = requireUser(req);
+  const domainId = pathUuid(req);
+  const domain = await getDomainById(domainId, user.id);
+  if (!domain) return json({ error: "Domain not found" }, 404);
+  const raw = req.params.email ? decodeURIComponent(req.params.email) : "";
+  const email = raw.trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return json({ error: "Provide a valid email address." }, 400);
+  }
+  const removed = await removeSuppression(domainId, email);
+  if (!removed) return json({ error: "Suppression not found" }, 404);
+  return json({ success: true, message: "Suppression removed." });
 }
 
 
@@ -376,6 +401,24 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
 
   if (bareAddress(from).split("@")[1]?.toLowerCase() !== domain.domain.toLowerCase()) {
     return json({ error: `From email must use the domain ${domain.domain}.` }, 400);
+  }
+
+  // Suppression check sits after validation but before idempotency, rate limits,
+  // quota, and SES. Blocked recipients never burn quota, rate-limit capacity,
+  // or an idempotency claim, and the multi-recipient rule is all-or-nothing:
+  // if any recipient is suppressed the entire send is rejected so no partial
+  // delivery occurs.
+  {
+    const allRecipients = [...to, ...(cc ?? []), ...(bcc ?? [])].map((a) => bareAddress(a));
+    const suppressed = await findSuppressed(domain.id, allRecipients);
+    if (suppressed.length > 0) {
+      const list = suppressed.join(", ");
+      const error =
+        suppressed.length === 1
+          ? `Recipient ${list} previously bounced or was marked as spam for this domain and won't receive mail. Remove it from the suppression list to send again.`
+          : `Recipients ${list} previously bounced or were marked as spam for this domain and won't receive mail. Remove them from the suppression list to send again.`;
+      return json({ error, message: error, suppressed }, 400);
+    }
   }
 
   // Claimed before rate limits so a replay never consumes quota again.

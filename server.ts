@@ -54,6 +54,8 @@ const server = Bun.serve({
     "/api/domains": methods({ GET: h.listDomains, POST: h.createDomain }),
     "/api/domains/:id": methods({ GET: h.getDomain, DELETE: h.removeDomain }),
     "/api/domains/:id/verify": methods({ POST: h.verifyDomain }),
+    "/api/domains/:id/suppressions": methods({ GET: h.listSuppressionsHandler }),
+    "/api/domains/:id/suppressions/:email": methods({ DELETE: h.removeSuppressionHandler }),
     "/api/api-keys": methods({ GET: h.listApiKeys, POST: h.createApiKey }),
     "/api/api-keys/:id": methods({ PUT: h.updateApiKey, DELETE: h.removeApiKey }),
     "/api/emails": methods({ POST: h.sendEmailHandler }),
