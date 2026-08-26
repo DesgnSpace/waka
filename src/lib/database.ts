@@ -106,6 +106,7 @@ export interface ApiKey {
   key_hash: string;
   key_prefix: string;
   permissions: string[];
+  expires_at?: string | null;
   last_used_at?: string | null;
   created_at: string;
   updated_at: string;

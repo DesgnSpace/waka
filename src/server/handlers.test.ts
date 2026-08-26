@@ -62,6 +62,10 @@ mock.module("@/lib/auth", () => {
   };
 });
 mock.module("@/lib/api-keys", () => ({
+  ExpiredApiKeyError: class ExpiredApiKeyError extends Error {
+    expiresAt: string;
+    constructor(v: string) { super(v); this.expiresAt = v; this.name = "ExpiredApiKeyError"; }
+  },
   verifyApiKey: async (token: string) => {
     if (token.startsWith("wka_test")) return apiKey;
     if (token.startsWith("wka_send"))
@@ -89,6 +93,7 @@ mock.module("@/lib/api-keys", () => ({
   },
   getUserApiKeys: async () => [],
   deleteApiKey: async () => {},
+  updateApiKey: async () => {},
   updateApiKeyPermissions: async () => {},
 }));
 const unusedSesFn = async () => {

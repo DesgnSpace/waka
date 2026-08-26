@@ -69,14 +69,16 @@ The Resend Node.js SDK can use the same API key when its base URL is set to `htt
 - `GET|POST /api/domains`
 - `GET|DELETE /api/domains/:id`
 - `POST /api/domains/:id/verify`
-- `GET|POST /api/api-keys`
-- `PUT|DELETE /api/api-keys/:id`
+- `GET|POST /api/api-keys` — `POST` body: `{ domainId, keyName, permissions?: ["send"], expiresAt?: string|null }`. `expiresAt` is an ISO 8601 timestamp; `null` or omitted means the key never expires. Keys that carry only the removed permissions `receive`/`webhooks` are rejected; existing keys that stored them remain without `send` and continue to be denied without being widened.
+- `PUT|DELETE /api/api-keys/:id` — `PUT` body: `{ permissions?: ["send"], expiresAt?: string|null }` (at least one required). Clearing expiry uses `null` or `""`.
 - `POST /api/emails`
 - `GET /api/emails/logs`
 - `GET /api/emails/:id`
 - `GET /api/usage` — per-day counts for `sent`, `delivered`, `bounced`, `complained`, `opened`, `clicked`. Auth: `Bearer wka_` (scoped to its domain) or `Bearer <JWT>` (all owned domains). Query: `from=YYYY-MM-DD` and `to=YYYY-MM-DD`, inclusive. Defaults to the last 30 days when omitted; maximum range is 90 days. Every day in the range is returned, including zeros. Response: `{ success: true, data: { from, to, usage: [{ date, sent, delivered, bounced, complained, opened, clicked }] } }`. Aggregated in a single SQL query using `generate_series` and left-joined log/event counts; uses index `idx_email_logs_domain_id_created_at (domain_id, created_at DESC)` for the log time range.
 - `POST /api/webhooks/ses`
 - `POST /api/tools/email-dns-checker`
+
+API keys with `expires_at` in the past are rejected with `401 { error: "This API key has expired. Create a new API key for this domain to continue." }`. A key without `expires_at` never expires. The only accepted permission is `send`; `receive` and `webhooks` were removed because no route enforced them.
 
 Dashboard routes are `/`, `/login`, `/logout`, `/dashboard`, and the domain and log views under `/ui/`.
 

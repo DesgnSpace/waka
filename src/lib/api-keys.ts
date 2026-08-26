@@ -22,8 +22,23 @@ type ApiKeyPublicRow = DbRow<
 type ApiKeyVerificationRow = ApiKeyPublicRow & { key_hash: string };
 type ApiKeyWithDomainRow = ApiKeyPublicRow & { domain_name: string | null };
 
+const ALLOWED_PERMISSIONS = ["send"] as const;
+
+export class ExpiredApiKeyError extends Error {
+  expiresAt: string;
+  constructor(expiresAt: string) {
+    super(`API key expired at ${expiresAt}`);
+    this.name = "ExpiredApiKeyError";
+    this.expiresAt = expiresAt;
+  }
+}
+
 function parsePermissions(value: unknown): string[] {
-  return value == null ? ["send"] : parseStringArray(value, "permissions");
+  const raw = value == null ? ["send"] : parseStringArray(value, "permissions");
+  const filtered = raw.filter((p) => (ALLOWED_PERMISSIONS as readonly string[]).includes(p));
+  // Legacy keys that only carried removed permissions remain without send
+  // rather than being widened to send.
+  return filtered;
 }
 
 function publicApiKey(row: ApiKeyPublicRow): PublicApiKey {
@@ -34,6 +49,7 @@ function publicApiKey(row: ApiKeyPublicRow): PublicApiKey {
     key_name: row.key_name,
     key_prefix: row.key_prefix,
     permissions: parsePermissions(row.permissions),
+    expires_at: (row as unknown as { expires_at?: string | null }).expires_at ?? null,
     last_used_at: row.last_used_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -44,7 +60,8 @@ export async function generateApiKey(
   userId: string,
   domainId: string,
   keyName: string,
-  permissions: string[] = ["send"]
+  permissions: string[] = ["send"],
+  expiresAt: string | null = null
 ): Promise<ApiKeyWithKey> {
   // Generate a secure API key with prefix
   const keyId = randomKeyPart();
@@ -57,20 +74,31 @@ export async function generateApiKey(
   // Hash the key for storage
   const keyHash = await bcrypt.hash(apiKey, 10);
 
+  const sanitized = permissions.filter((p) => (ALLOWED_PERMISSIONS as readonly string[]).includes(p));
+  const finalPermissions = sanitized.length ? sanitized : ["send"];
+
+  let expiresAtIso: string | null = null;
+  if (expiresAt) {
+    const d = new Date(expiresAt);
+    if (isNaN(d.getTime())) throw new Error("Invalid expiry date.");
+    expiresAtIso = d.toISOString();
+  }
+
   try {
     const result = await query<ApiKeyPublicRow>(
-      `INSERT INTO api_keys (user_id, domain_id, key_name, key_hash, key_prefix, permissions)
-       SELECT $1, d.id, $3, $4, $5, $6
+      `INSERT INTO api_keys (user_id, domain_id, key_name, key_hash, key_prefix, permissions, expires_at)
+       SELECT $1, d.id, $3, $4, $5, $6, $7
        FROM domains d
        WHERE d.id = $2 AND d.user_id = $1
-       RETURNING id, user_id, domain_id, key_name, key_prefix, permissions, last_used_at, created_at, updated_at`,
+       RETURNING id, user_id, domain_id, key_name, key_prefix, permissions, expires_at, last_used_at, created_at, updated_at`,
       [
         userId,
         domainId,
         keyName,
         keyHash,
         `wka_${keyId}`,
-        JSON.stringify(permissions),
+        JSON.stringify(finalPermissions),
+        expiresAtIso,
       ]
     );
 
@@ -111,7 +139,7 @@ export async function verifyApiKey(
 
   const result = await query<ApiKeyVerificationRow>(
     `SELECT ak.id, ak.user_id, ak.domain_id, ak.key_name, ak.key_hash,
-            ak.key_prefix, ak.permissions, ak.last_used_at, ak.created_at, ak.updated_at
+            ak.key_prefix, ak.permissions, ak.expires_at, ak.last_used_at, ak.created_at, ak.updated_at
      FROM api_keys ak
      JOIN domains d ON d.id = ak.domain_id AND d.user_id = ak.user_id
      WHERE ak.key_prefix = $1`,
@@ -121,6 +149,10 @@ export async function verifyApiKey(
   for (const key of result.rows) {
     const isValid = await bcrypt.compare(apiKey, key.key_hash);
     if (isValid) {
+      const expiresAt = (key as unknown as { expires_at?: string | null }).expires_at;
+      if (expiresAt && new Date(expiresAt).getTime() <= Date.now()) {
+        throw new ExpiredApiKeyError(expiresAt);
+      }
       await query(
         "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1 AND user_id = $2",
         [key.id, key.user_id],
@@ -139,7 +171,7 @@ export async function getUserApiKeys(
     const result = await query<ApiKeyWithDomainRow>(
       `SELECT 
         ak.id, ak.user_id, ak.domain_id, ak.key_name, ak.key_prefix,
-        ak.permissions, ak.last_used_at, ak.created_at, ak.updated_at,
+        ak.permissions, ak.expires_at, ak.last_used_at, ak.created_at, ak.updated_at,
         d.domain as domain_name
       FROM api_keys ak
       JOIN domains d ON ak.domain_id = d.id AND d.user_id = ak.user_id
@@ -164,7 +196,7 @@ export async function getDomainApiKeys(
   try {
     const result = await query<ApiKeyPublicRow>(
       `SELECT ak.id, ak.user_id, ak.domain_id, ak.key_name, ak.key_prefix,
-              ak.permissions, ak.last_used_at, ak.created_at, ak.updated_at
+              ak.permissions, ak.expires_at, ak.last_used_at, ak.created_at, ak.updated_at
        FROM api_keys ak
        JOIN domains d ON d.id = ak.domain_id AND d.user_id = ak.user_id
        WHERE ak.domain_id = $1 AND ak.user_id = $2
@@ -201,10 +233,12 @@ export async function updateApiKeyPermissions(
   userId: string,
   permissions: string[]
 ): Promise<void> {
+  const sanitized = permissions.filter((p) => (ALLOWED_PERMISSIONS as readonly string[]).includes(p));
+  if (!sanitized.length) throw new Error("At least one valid permission is required.");
   try {
     const result = await query(
       "UPDATE api_keys SET permissions = $1 WHERE id = $2 AND user_id = $3",
-      [JSON.stringify(permissions), keyId, userId]
+      [JSON.stringify(sanitized), keyId, userId]
     );
 
     if (result.rowCount === 0) {
@@ -213,4 +247,44 @@ export async function updateApiKeyPermissions(
   } catch (error: unknown) {
     throw new Error(`Couldn't update API key permissions: ${errorMessage(error)}`);
   }
+}
+
+export async function updateApiKey(
+  keyId: string,
+  userId: string,
+  updates: { permissions?: string[] | null; expiresAt?: string | null }
+): Promise<void> {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  let idx = 1;
+
+  if (updates.permissions !== undefined) {
+    if (updates.permissions === null || updates.permissions.length === 0) {
+      throw new Error("At least one valid permission is required.");
+    }
+    const sanitized = updates.permissions.filter((p) => (ALLOWED_PERMISSIONS as readonly string[]).includes(p));
+    if (!sanitized.length) throw new Error("At least one valid permission is required.");
+    sets.push(`permissions = $${idx++}`);
+    params.push(JSON.stringify(sanitized));
+  }
+
+  if (updates.expiresAt !== undefined) {
+    let iso: string | null = null;
+    if (updates.expiresAt !== null) {
+      const d = new Date(updates.expiresAt);
+      if (isNaN(d.getTime())) throw new Error("Invalid expiry date.");
+      iso = d.toISOString();
+    }
+    sets.push(`expires_at = $${idx++}`);
+    params.push(iso);
+  }
+
+  if (!sets.length) throw new Error("No fields to update.");
+
+  params.push(keyId, userId);
+  const result = await query(
+    `UPDATE api_keys SET ${sets.join(", ")} WHERE id = $${idx++} AND user_id = $${idx}`,
+    params
+  );
+  if (result.rowCount === 0) throw new Error("API key not found or you don't have access.");
 }

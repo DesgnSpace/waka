@@ -2,7 +2,7 @@ import * as Sentry from "@sentry/bun";
 import crypto from "crypto";
 import { z, ZodError } from "zod";
 import { verifyJWT, type AuthUser } from "@/lib/auth";
-import { verifyApiKey } from "@/lib/api-keys";
+import { verifyApiKey, ExpiredApiKeyError } from "@/lib/api-keys";
 import type { ApiKey } from "@/lib/database";
 
 // CORS is configured via CORS_ORIGIN or DOMAIN env. Default is same-origin
@@ -153,9 +153,16 @@ export async function requireApiKey(req: Request): Promise<Omit<ApiKey, "key_has
   if (!auth?.startsWith("Bearer ")) {
     throw new HttpError(401, { error: "Include an API key in the Authorization header." });
   }
-  const key = await verifyApiKey(auth.slice(7));
-  if (!key)     throw new HttpError(401, { error: "API key is invalid or revoked." });
-  return key;
+  try {
+    const key = await verifyApiKey(auth.slice(7));
+    if (!key) throw new HttpError(401, { error: "API key is invalid or revoked." });
+    return key;
+  } catch (err) {
+    if (err instanceof ExpiredApiKeyError) {
+      throw new HttpError(401, { error: "This API key has expired. Create a new API key for this domain to continue." });
+    }
+    throw err;
+  }
 }
 
 // --- session cookie (HTMX dashboard) ----------------------------------------

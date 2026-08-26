@@ -22,7 +22,7 @@ import {
   generateApiKey,
   getUserApiKeys,
   deleteApiKey,
-  updateApiKeyPermissions,
+  updateApiKey as updateApiKeyRecord,
 } from "@/lib/api-keys";
 import { sendEmail } from "@/lib/ses";
 import {
@@ -199,15 +199,35 @@ export async function verifyDomain(req: Req): Promise<Response> {
 // api keys
 // ----------------------------------------------------------------------------
 
+const expiresAtInput = z.preprocess(
+  (v) => (v === "" ? undefined : v),
+  z
+    .union([
+      z
+        .string()
+        .refine((s) => !isNaN(Date.parse(s)), { message: "Invalid expiry date. Use ISO 8601 format." }),
+      z.null(),
+    ])
+    .optional()
+);
+
 const createApiKeySchema = z.object({
   domainId: z.string().uuid("Invalid domain ID"),
   keyName: z.string().trim().min(1, "Key name is required").max(255),
-  permissions: z.array(z.enum(["send", "receive", "webhooks"])).max(3).optional().default(["send"]),
+  permissions: z.array(z.enum(["send"])).max(1).optional().default(["send"]),
+  expiresAt: expiresAtInput,
+  expires_at: expiresAtInput.optional(),
 });
 
-const updateApiKeySchema = z.object({
-  permissions: z.array(z.enum(["send", "receive", "webhooks"])).min(1).max(3),
-});
+const updateApiKeySchema = z
+  .object({
+    permissions: z.array(z.enum(["send"])).min(1).max(1).optional(),
+    expiresAt: expiresAtInput,
+    expires_at: expiresAtInput.optional(),
+  })
+  .refine((d) => d.permissions !== undefined || d.expiresAt !== undefined || d.expires_at !== undefined, {
+    message: "Provide permissions or expiresAt to update.",
+  });
 
 export async function listApiKeys(req: Req): Promise<Response> {
   const user = requireUser(req);
@@ -217,7 +237,11 @@ export async function listApiKeys(req: Req): Promise<Response> {
 
 export async function createApiKey(req: Req): Promise<Response> {
   const user = requireUser(req);
-  const { domainId, keyName, permissions } = createApiKeySchema.parse(await jsonBody(req));
+  const parsed = createApiKeySchema.parse(await jsonBody(req));
+  const domainId = parsed.domainId;
+  const keyName = parsed.keyName;
+  const permissions = parsed.permissions;
+  const expiresAt = parsed.expiresAt ?? parsed.expires_at ?? null;
 
   const domain = await getDomainById(domainId, user.id);
   if (!domain) {
@@ -227,7 +251,7 @@ export async function createApiKey(req: Req): Promise<Response> {
     return json({ error: "Verify the domain before creating API keys." }, 400);
   }
 
-  const apiKey = await generateApiKey(user.id, domainId, keyName, permissions);
+  const apiKey = await generateApiKey(user.id, domainId, keyName, permissions, expiresAt ?? null);
   return json({
     success: true,
     data: { apiKey },
@@ -237,9 +261,13 @@ export async function createApiKey(req: Req): Promise<Response> {
 
 export async function updateApiKey(req: Req): Promise<Response> {
   const user = requireUser(req);
-  const { permissions } = updateApiKeySchema.parse(await jsonBody(req));
-  await updateApiKeyPermissions(pathUuid(req), user.id, permissions);
-  return json({ success: true, message: "API key permissions updated." });
+  const parsed = updateApiKeySchema.parse(await jsonBody(req));
+  const expiresAt = parsed.expiresAt ?? parsed.expires_at;
+  await updateApiKeyRecord(pathUuid(req), user.id, {
+    permissions: parsed.permissions ?? undefined,
+    expiresAt: expiresAt as string | null | undefined,
+  });
+  return json({ success: true, message: "API key updated." });
 }
 
 export async function removeApiKey(req: Req): Promise<Response> {
