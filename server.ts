@@ -12,6 +12,7 @@ import { snsWebhook } from "@/server/webhooks";
 import * as ui from "@/server/ui";
 import { migrate } from "@/lib/migrate";
 import { purgeExpiredIdempotencyKeys } from "@/lib/idempotency";
+import { purgeExpiredRateLimitBuckets } from "@/lib/rate-limit";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -37,6 +38,23 @@ function scheduleIdempotencyPurge(): void {
   }, IDEMPOTENCY_PURGE_INTERVAL_MS);
 }
 scheduleIdempotencyPurge();
+
+const RATE_LIMIT_PURGE_INTERVAL_MS = 60 * 60 * 1000;
+function scheduleRateLimitPurge(): void {
+  setTimeout(() => {
+    purgeExpiredRateLimitBuckets()
+      .catch((err: unknown) => console.error("Failed to purge expired rate-limit buckets:", err))
+      .finally(scheduleRateLimitPurge);
+  }, RATE_LIMIT_PURGE_INTERVAL_MS);
+}
+if (typeof (Bun as unknown as { cron?: unknown }).cron === "function") {
+  (Bun as unknown as { cron: (expr: string, fn: () => Promise<void>) => void }).cron(
+    "0 * * * *",
+    purgeExpiredRateLimitBuckets,
+  );
+} else {
+  scheduleRateLimitPurge();
+}
 
 // Drop-in replacement for the previous Next.js app: identical /api/* paths,
 // JSON shapes, auth, and env, plus an HTMX dashboard. Business logic is reused

@@ -7,6 +7,9 @@ import { parseStringArray } from "./serialization";
 
 export type PublicApiKey = Omit<ApiKey, "key_hash">;
 
+const LAST_USED_THROTTLE_MS = 5 * 60 * 1000;
+const lastUsedAtCache = new Map<string, number>();
+
 const randomKeyPart = customAlphabet(
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
   8,
@@ -125,10 +128,15 @@ export async function verifyApiKey(
   for (const key of result.rows) {
     const isValid = await bcrypt.compare(apiKey, key.key_hash);
     if (isValid) {
-      await query(
-        "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1 AND user_id = $2",
-        [key.id, key.user_id],
-      );
+      const now = Date.now();
+      const last = lastUsedAtCache.get(key.id);
+      if (last === undefined || now - last >= LAST_USED_THROTTLE_MS) {
+        lastUsedAtCache.set(key.id, now);
+        await query(
+          "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1 AND user_id = $2 AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '5 minutes')",
+          [key.id, key.user_id],
+        );
+      }
       return publicApiKey(key);
     }
   }
