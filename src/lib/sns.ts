@@ -1,5 +1,7 @@
 import crypto from "crypto";
 
+import { TtlCache } from "./ttl-cache";
+
 // Amazon SNS HTTP(S) message signature validation.
 //
 // Verifies that an incoming SNS message genuinely originates from AWS before we
@@ -48,7 +50,13 @@ const SIGNED_KEYS: Record<string, Array<keyof SnsMessage>> = {
   ],
 };
 
-const certCache = new Map<string, string>();
+// AWS rotates signing certificates rarely, so a one-hour TTL bounds how long a
+// stale certificate can keep validating (or rejecting) signatures after
+// rotation. 50 entries is far above the handful of distinct cert URLs SNS uses,
+// keeping memory bounded without evicting live traffic.
+const CERT_CACHE_TTL_MS = 60 * 60 * 1000;
+const CERT_CACHE_MAX_ENTRIES = 50;
+const certCache = new TtlCache<string>(CERT_CACHE_TTL_MS, CERT_CACHE_MAX_ENTRIES);
 const snsHostPattern = /^sns\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$/i;
 
 function isValidSnsUrl(rawUrl: string): URL | null {
@@ -70,7 +78,7 @@ function isValidCertUrl(rawUrl: string): boolean {
 }
 
 async function fetchCert(certUrl: string): Promise<string> {
-  const cached = certCache.get(certUrl);
+  const cached = certCache.get(certUrl, Date.now());
   if (cached) return cached;
 
   const res = await fetch(certUrl);
@@ -78,7 +86,7 @@ async function fetchCert(certUrl: string): Promise<string> {
     throw new Error(`Couldn't fetch SNS signing certificate: ${res.status}`);
   }
   const pem = await res.text();
-  certCache.set(certUrl, pem);
+  certCache.set(certUrl, pem, Date.now());
   return pem;
 }
 

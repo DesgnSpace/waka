@@ -400,6 +400,7 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
     }
   }
 
+
   let messageId: string;
   try {
     messageId = await sendEmail({
@@ -668,6 +669,11 @@ async function resolveCname(name: string, errors: string[]): Promise<string[]> {
 }
 
 export async function emailDnsChecker(req: Req): Promise<Response> {
+  const ipRate = await checkRateLimit(`dns-check:${requestAddress(req)}`, 10, 60_000);
+  if (!ipRate.allowed) {
+    throw new HttpError(429, { error: "Too many DNS lookups. Try again later." });
+  }
+
   const body = z.object({
     domain: z.string().min(1),
     dkimSelector: z.string().nullable().optional(),
