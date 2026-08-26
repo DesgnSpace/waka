@@ -24,3 +24,8 @@ test("rejects missing or mismatched CSRF tokens", () => {
   form.set("csrf", createCsrfToken());
   expect(isValidCsrfToken(request, form.get("csrf"))).toBe(false);
 });
+
+test("sets the CSRF cookie as HttpOnly so scripts cannot read it", () => {
+  const attributes = csrfCookie(createCsrfToken()).split(";").map((a) => a.trim());
+  expect(attributes).toContain("HttpOnly");
+});

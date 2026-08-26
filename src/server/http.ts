@@ -183,7 +183,7 @@ export function createCsrfToken(): string {
 }
 
 export function csrfCookie(token: string): string {
-  return `${CSRF_COOKIE}=${token}; Path=/; SameSite=Strict${secureFlag}; Max-Age=${CSRF_MAX_AGE}`;
+  return `${CSRF_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Strict${secureFlag}; Max-Age=${CSRF_MAX_AGE}`;
 }
 
 export function clearCsrfCookie(): string {
