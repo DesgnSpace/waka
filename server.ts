@@ -44,6 +44,7 @@ const server = Bun.serve({
     "/api/api-keys/:id": methods({ PUT: h.updateApiKey, DELETE: h.removeApiKey }),
     "/api/emails": methods({ POST: h.sendEmailHandler }),
     "/api/emails/logs": methods({ GET: h.emailLogs }),
+    "/api/usage": methods({ GET: h.usage }),
     "/api/emails/:id": methods({ GET: h.getEmail }),
     "/api/webhooks/ses": methods({ POST: snsWebhook }),
     "/api/tools/email-dns-checker": methods({ POST: h.emailDnsChecker }),

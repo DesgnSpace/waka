@@ -74,6 +74,7 @@ The Resend Node.js SDK can use the same API key when its base URL is set to `htt
 - `POST /api/emails`
 - `GET /api/emails/logs`
 - `GET /api/emails/:id`
+- `GET /api/usage` — per-day counts for `sent`, `delivered`, `bounced`, `complained`, `opened`, `clicked`. Auth: `Bearer wka_` (scoped to its domain) or `Bearer <JWT>` (all owned domains). Query: `from=YYYY-MM-DD` and `to=YYYY-MM-DD`, inclusive. Defaults to the last 30 days when omitted; maximum range is 90 days. Every day in the range is returned, including zeros. Response: `{ success: true, data: { from, to, usage: [{ date, sent, delivered, bounced, complained, opened, clicked }] } }`. Aggregated in a single SQL query using `generate_series` and left-joined log/event counts; uses index `idx_email_logs_domain_id_created_at (domain_id, created_at DESC)` for the log time range.
 - `POST /api/webhooks/ses`
 - `POST /api/tools/email-dns-checker`
 

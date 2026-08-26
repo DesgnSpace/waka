@@ -110,15 +110,61 @@ installFakeDatabase("./database");
 
 const { getDomainById } = await import("./domains");
 const { generateJWT } = await import("./auth");
-const { getEmail } = await import("@/server/handlers");
+const { getEmail, usage } = await import("@/server/handlers");
 
 beforeEach(() => {
   executedQueries.length = 0;
   onFakeQuery((sql, params = []) => {
+    if (sql.includes("WITH days AS") || sql.includes("generate_series")) {
+      // usage aggregated query: params = [domainIds, from, to, userId]
+      const domainIds = params[0] as string[];
+      const from = params[1] as string;
+      const to = params[2] as string;
+      const userId = params[3] as string;
+      // tenant isolation: only rows where domain belongs to userId are counted;
+      // fake data: one sent on from date for accountA/domainA
+      const owned = domainIds.some((id) => {
+        if (userId === accountA && id === domainA) return true;
+        if (userId === accountB && id === domainB) return true;
+        return false;
+      });
+      if (!owned) {
+        // return zero rows per day
+        const days: Record<string, unknown>[] = [];
+        const f = new Date(`${from}T00:00:00.000Z`);
+        const t = new Date(`${to}T00:00:00.000Z`);
+        for (let d = new Date(f); d <= t; d.setUTCDate(d.getUTCDate() + 1)) {
+          const day = d.toISOString().slice(0, 10);
+          days.push({ day, sent: "0", delivered: "0", bounced: "0", complained: "0", opened: "0", clicked: "0" });
+        }
+        return { rows: days, rowCount: days.length };
+      }
+      // for accountA return a non-zero row on the first day to prove scoping
+      const f = new Date(`${from}T00:00:00.000Z`);
+      const t = new Date(`${to}T00:00:00.000Z`);
+      const rows: Record<string, unknown>[] = [];
+      for (let d = new Date(f); d <= t; d.setUTCDate(d.getUTCDate() + 1)) {
+        const day = d.toISOString().slice(0, 10);
+        if (userId === accountA && day === from) {
+          rows.push({ day, sent: "1", delivered: "1", bounced: "0", complained: "0", opened: "2", clicked: "1" });
+        } else {
+          rows.push({ day, sent: "0", delivered: "0", bounced: "0", complained: "0", opened: "0", clicked: "0" });
+        }
+      }
+      return { rows, rowCount: rows.length };
+    }
     if (sql.includes("FROM domains")) {
-      return params[1] === accountB
-        ? { rows: [{ id: domainB, user_id: accountB, dns_records: [] }], rowCount: 1 }
-        : { rows: [], rowCount: 0 };
+      // both the two-col (id, user_id) check and the single-col usage domain list
+      const userId = (params[1] as string | undefined) ?? (params[0] as string);
+      if (userId === accountB) return { rows: [{ id: domainB, user_id: accountB, dns_records: [] }], rowCount: 1 };
+      if (userId === accountA) {
+        // for usage: return domainA for accountA
+        if (sql.includes("WHERE user_id = $1") && params.length === 1) {
+          return { rows: [{ id: domainA }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      }
+      return { rows: [], rowCount: 0 };
     }
     if (sql.includes("FROM email_logs el")) {
       const message = messages[String(params[0])];
@@ -247,4 +293,93 @@ test("an expired or invalid dashboard session keeps the dashboard 401", async ()
 
   expect((thrown as { status: number }).status).toBe(401);
   expect((thrown as { body: unknown }).body).toEqual({ error: "Your session expired. Sign in again." });
+});
+
+function usageRequest(token?: string, from?: string, to?: string): Req {
+  const qs = new URLSearchParams();
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
+  const url = `http://localhost/api/usage${qs.toString() ? `?${qs.toString()}` : ""}`;
+  const request = new Request(url, {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  }) as Req;
+  request.params = {};
+  return request;
+}
+
+function usageQueries() {
+  return executedQueries.filter((q) => q.sql.includes("generate_series") || q.sql.includes("WITH days AS"));
+}
+
+test("an API key gets usage scoped to its own domain", async () => {
+  const res = await usage(usageRequest(keySendToken, "2026-01-01", "2026-01-03"));
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.data.from).toBe("2026-01-01");
+  expect(body.data.to).toBe("2026-01-03");
+  expect(body.data.usage).toHaveLength(3);
+  const q = usageQueries()[0];
+  expect(q.params[0]).toEqual([domainA]);
+  expect(q.params[3]).toBe(accountA);
+});
+
+test("a dashboard JWT gets usage across its owned domains", async () => {
+  const token = generateJWT({ id: accountA, email: "a@example.com" });
+  const res = await usage(usageRequest(token, "2026-01-01", "2026-01-02"));
+  expect(res.status).toBe(200);
+  const q = usageQueries()[0];
+  expect(q.params[0]).toEqual([domainA]);
+  expect(q.params[3]).toBe(accountA);
+});
+
+test("another account's usage data is not leaked", async () => {
+  const tokenB = generateJWT({ id: accountB, email: "b@example.com" });
+  const resA = await usage(usageRequest(keySendToken, "2026-01-01", "2026-01-01"));
+  const bodyA = await resA.json();
+  const resB = await usage(usageRequest(tokenB, "2026-01-01", "2026-01-01"));
+  const bodyB = await resB.json();
+  // accountA has data on from day, accountB does not
+  expect(bodyA.data.usage[0].sent).toBe(1);
+  expect(bodyB.data.usage[0].sent).toBe(0);
+  expect(bodyA.data.usage[0].opened).toBe(2);
+  expect(bodyB.data.usage[0].opened).toBe(0);
+});
+
+test("usage returns every day in range including zeros", async () => {
+  const token = generateJWT({ id: accountB, email: "b@example.com" });
+  // accountB fake returns zeros for all days
+  const res = await usage(usageRequest(token, "2026-02-01", "2026-02-03"));
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.data.usage).toEqual([
+    { date: "2026-02-01", sent: 0, delivered: 0, bounced: 0, complained: 0, opened: 0, clicked: 0 },
+    { date: "2026-02-02", sent: 0, delivered: 0, bounced: 0, complained: 0, opened: 0, clicked: 0 },
+    { date: "2026-02-03", sent: 0, delivered: 0, bounced: 0, complained: 0, opened: 0, clicked: 0 },
+  ]);
+});
+
+test("usage range cap rejects more than 90 days", async () => {
+  const token = generateJWT({ id: accountA, email: "a@example.com" });
+  let thrown: unknown;
+  try {
+    await usage(usageRequest(token, "2026-01-01", "2026-04-15"));
+  } catch (e) {
+    thrown = e;
+  }
+  expect((thrown as { status: number }).status).toBe(400);
+  expect((thrown as { body: unknown }).body).toEqual({ error: "Date range too large. Maximum 90 days." });
+  expect(usageQueries()).toHaveLength(0);
+});
+
+test("usage defaults to 30 days when no range is given", async () => {
+  const token = generateJWT({ id: accountA, email: "a@example.com" });
+  const res = await usage(usageRequest(token));
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.data.usage).toHaveLength(30);
+});
+
+test("usage requires authentication", async () => {
+  const res = await usage(usageRequest(undefined, "2026-01-01", "2026-01-02"));
+  expect(res.status).toBe(401);
 });

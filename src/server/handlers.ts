@@ -545,6 +545,154 @@ export async function emailLogs(req: Req): Promise<Response> {
   });
 }
 
+const MAX_USAGE_DAYS = 90;
+const DEFAULT_USAGE_DAYS = 30;
+
+function parseUsageDate(value: string): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new HttpError(400, { error: `Invalid date: ${value}. Use YYYY-MM-DD.` });
+  const d = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(d.getTime())) throw new HttpError(400, { error: `Invalid date: ${value}.` });
+  return d;
+}
+
+function toDateOnly(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+type UsageRow = DbRow<{
+  day: string;
+  sent: string;
+  delivered: string;
+  bounced: string;
+  complained: string;
+  opened: string;
+  clicked: string;
+}>;
+
+export async function usage(req: Req): Promise<Response> {
+  const auth = req.headers.get("authorization");
+  if (!auth?.startsWith("Bearer ")) {
+    return json({ error: "Missing authorization header" }, 401);
+  }
+
+  const url = new URL(req.url);
+  const raw = Object.fromEntries(url.searchParams.entries());
+  const fromRaw = (raw.from ?? raw.start_date ?? raw.startDate ?? raw.start ?? "") as string | undefined;
+  const toRaw = (raw.to ?? raw.end_date ?? raw.endDate ?? raw.end ?? "") as string | undefined;
+  const hasFrom = typeof fromRaw === "string" && fromRaw.length > 0;
+  const hasTo = typeof toRaw === "string" && toRaw.length > 0;
+
+  const today = new Date();
+  const todayStr = toDateOnly(today);
+
+  let fromStr: string;
+  let toStr: string;
+  if (!hasFrom && !hasTo) {
+    const fromDate = new Date(`${todayStr}T00:00:00.000Z`);
+    fromDate.setUTCDate(fromDate.getUTCDate() - (DEFAULT_USAGE_DAYS - 1));
+    fromStr = toDateOnly(fromDate);
+    toStr = todayStr;
+  } else if (hasFrom && hasTo) {
+    fromStr = fromRaw as string;
+    toStr = toRaw as string;
+  } else if (hasFrom) {
+    fromStr = fromRaw as string;
+    const fromDate = parseUsageDate(fromStr);
+    const toDate = new Date(fromDate);
+    toDate.setUTCDate(toDate.getUTCDate() + (DEFAULT_USAGE_DAYS - 1));
+    const cappedTo = toDateOnly(toDate);
+    toStr = cappedTo > todayStr ? todayStr : cappedTo;
+  } else {
+    toStr = toRaw as string;
+    const toDate = parseUsageDate(toStr);
+    const fromDate = new Date(toDate);
+    fromDate.setUTCDate(fromDate.getUTCDate() - (DEFAULT_USAGE_DAYS - 1));
+    fromStr = toDateOnly(fromDate);
+  }
+
+  const fromDate = parseUsageDate(fromStr);
+  const toDate = parseUsageDate(toStr);
+  if (fromDate.getTime() > toDate.getTime()) {
+    throw new HttpError(400, { error: "`from` must be on or before `to`." });
+  }
+  const daysInclusive = Math.floor((toDate.getTime() - fromDate.getTime()) / 86400000) + 1;
+  if (daysInclusive > MAX_USAGE_DAYS) {
+    throw new HttpError(400, { error: `Date range too large. Maximum ${MAX_USAGE_DAYS} days.` });
+  }
+
+  let domainIds: string[] = [];
+  let scopedUserId: string;
+  if (auth.startsWith("Bearer wka_")) {
+    const apiKey = await requireApiKey(req);
+    domainIds = [apiKey.domain_id];
+    scopedUserId = apiKey.user_id;
+  } else {
+    const user = requireUser(req);
+    scopedUserId = user.id;
+    const result = await query<DomainIdRow>("SELECT id FROM domains WHERE user_id = $1", [user.id]);
+    domainIds = result.rows.map((d) => d.id);
+  }
+
+  const fromParam = toDateOnly(fromDate);
+  const toParam = toDateOnly(toDate);
+
+  const result = await query<UsageRow>(
+    `WITH days AS (
+       SELECT generate_series($2::date, $3::date, '1 day'::interval)::date AS day
+     ),
+     log_counts AS (
+       SELECT date_trunc('day', el.created_at)::date AS day,
+         COUNT(*) FILTER (WHERE el.status = 'sent') AS sent,
+         COUNT(*) FILTER (WHERE el.status = 'delivered') AS delivered,
+         COUNT(*) FILTER (WHERE el.status = 'bounced') AS bounced,
+         COUNT(*) FILTER (WHERE el.status = 'complained') AS complained
+       FROM email_logs el
+       WHERE el.domain_id = ANY($1)
+         AND el.created_at >= $2::date::timestamptz
+         AND el.created_at < ($3::date + INTERVAL '1 day')::timestamptz
+         AND EXISTS (SELECT 1 FROM domains d WHERE d.id = el.domain_id AND d.user_id = $4)
+       GROUP BY 1
+     ),
+     event_counts AS (
+       SELECT date_trunc('day', ee.created_at)::date AS day,
+         COUNT(*) FILTER (WHERE ee.type = 'open') AS opened,
+         COUNT(*) FILTER (WHERE ee.type = 'click') AS clicked
+       FROM email_events ee
+       JOIN email_logs el ON el.id = ee.email_log_id
+       WHERE el.domain_id = ANY($1)
+         AND ee.created_at >= $2::date::timestamptz
+         AND ee.created_at < ($3::date + INTERVAL '1 day')::timestamptz
+         AND EXISTS (SELECT 1 FROM domains d WHERE d.id = el.domain_id AND d.user_id = $4)
+       GROUP BY 1
+     )
+     SELECT
+       days.day::text AS day,
+       COALESCE(l.sent, 0)::text AS sent,
+       COALESCE(l.delivered, 0)::text AS delivered,
+       COALESCE(l.bounced, 0)::text AS bounced,
+       COALESCE(l.complained, 0)::text AS complained,
+       COALESCE(e.opened, 0)::text AS opened,
+       COALESCE(e.clicked, 0)::text AS clicked
+     FROM days
+     LEFT JOIN log_counts l ON l.day = days.day
+     LEFT JOIN event_counts e ON e.day = days.day
+     ORDER BY days.day`,
+    [domainIds, fromParam, toParam, scopedUserId]
+  );
+
+  const usage = result.rows.map((row) => ({
+    date: row.day.slice(0, 10),
+    sent: Number(row.sent),
+    delivered: Number(row.delivered),
+    bounced: Number(row.bounced),
+    complained: Number(row.complained),
+    opened: Number(row.opened),
+    clicked: Number(row.clicked),
+  }));
+
+  return json({ success: true, data: { from: fromParam, to: toParam, usage } });
+}
+
 export async function getEmail(req: Req): Promise<Response> {
   let scopedUserId: string;
   let scopedDomainId: string | null = null;
