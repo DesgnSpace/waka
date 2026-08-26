@@ -36,6 +36,7 @@ import { errorCode, errorHttpStatus, errorMessage, errorName } from "@/lib/error
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 import { reserveDailySend } from "@/lib/quotas";
 import { parseJsonArray, parseJsonObject } from "@/lib/serialization";
+import { parseScheduledAt, storeScheduledEmail } from "@/lib/scheduled-sends";
 
 type DomainIdRow = DbRow<{ id: string }>;
 type EmailLogRow = DbRow<{
@@ -314,6 +315,8 @@ const sendEmailSchema = z
       },
       z.array(z.object({ name: z.string().min(1).max(256), value: z.string().max(256) })).max(50).optional()
     ),
+    // Resend-compatible scheduling: ISO 8601 timestamp or "in <n> minutes".
+    scheduled_at: z.string().max(64).optional(),
   })
   .refine((data) => data.html || data.text, {
     message: "Include either html or text content.",
@@ -331,8 +334,13 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
     return json({ error: "This API key can't send email. Create a key with send permission." }, 403);
   }
 
-  const { from, to, cc, bcc, subject, html, text, attachments, reply_to, tags } =
+  const { from, to, cc, bcc, subject, html, text, attachments, reply_to, tags, scheduled_at } =
     sendEmailSchema.parse(await jsonBody(req));
+
+  // Validate before any side effect: like other schema failures, a bad
+  // scheduled_at must not consume rate-limit or quota budget.
+  const schedule = parseScheduledAt(scheduled_at);
+  if (!schedule.ok) throw new HttpError(422, { error: schedule.reason });
 
   const domain = await getDomainById(apiKey.domain_id, apiKey.user_id);
   if (!domain) return json({ error: "Domain not found" }, 404);
@@ -363,6 +371,35 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
     contentType: a.contentType || a.content_type || "application/octet-stream",
     size: decodedBase64Bytes(a.content),
   }));
+
+  if (schedule.at) {
+    try {
+      const id = await storeScheduledEmail({
+        apiKeyId: apiKey.id,
+        domainId: domain.id,
+        from,
+        to,
+        cc,
+        bcc,
+        subject,
+        html,
+        text,
+        attachments: sesAttachments,
+        attachmentMeta,
+        replyTo: reply_to,
+        tags,
+        sendAt: schedule.at,
+      });
+      return json({ id, from, to, created_at: new Date().toISOString() });
+    } catch (error) {
+      console.error("Failed to record scheduled email:", error);
+      throw new HttpError(500, {
+        error: "Could not schedule the email. Nothing was queued.",
+        message: "Could not schedule the email. Nothing was queued.",
+      });
+    }
+  }
+
 
   let messageId: string;
   try {
@@ -470,7 +507,9 @@ export async function emailLogs(req: Req): Promise<Response> {
     page: z.coerce.number().int().min(1).max(10_000).default(1),
     limit: z.coerce.number().int().min(1).max(100).default(50),
     domain_id: z.string().uuid().optional(),
-    status: z.enum(["pending", "sent", "failed", "delivered", "bounced", "complained"]).optional(),
+    status: z
+      .enum(["pending", "sent", "failed", "delivered", "bounced", "complained", "scheduled", "sending"])
+      .optional(),
   }).parse(Object.fromEntries(url.searchParams));
   const { page, limit, domain_id: domainId, status } = params;
   const offset = (page - 1) * limit;
@@ -526,7 +565,9 @@ export async function emailLogs(req: Req): Promise<Response> {
      [...queryParams, limit, offset]
   );
 
-  const emails = emailLogsResult.rows.map((row) => ({
+  // payload carries the raw scheduled request body (attachment bytes included)
+  // and is for the sender, never for API readers.
+  const emails = emailLogsResult.rows.map(({ payload: _payload, ...row }) => ({
     ...row,
     to_emails: parseJsonArray(row.to_emails, "to_emails"),
     cc_emails: parseJsonArray(row.cc_emails, "cc_emails"),
@@ -569,8 +610,10 @@ export async function getEmail(req: Req): Promise<Response> {
     [pathUuid(req), user.id]
   );
 
+  // payload carries the raw scheduled request body and stays internal.
+  const { payload: _emailPayload, ...emailRow } = emailData;
   const email = {
-    ...emailData,
+    ...emailRow,
     to_emails: parseJsonArray(emailData.to_emails, "to_emails"),
     cc_emails: parseJsonArray(emailData.cc_emails, "cc_emails"),
     bcc_emails: parseJsonArray(emailData.bcc_emails, "bcc_emails"),

@@ -35,6 +35,7 @@ services:
       SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-waka-events}
       SES_SNS_TOPIC_ARN: ${SES_SNS_TOPIC_ARN:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-90}
     depends_on:
       postgres:
         condition: service_healthy

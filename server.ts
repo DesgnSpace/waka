@@ -8,6 +8,8 @@ Sentry.init({
 
 import { serveOptions } from "@/server/app";
 import { migrate } from "@/lib/migrate";
+import { startPruneJob } from "@/lib/prune";
+import { startScheduledSendJob } from "@/lib/scheduled-sends";
 import { bindServer } from "@/lib/rate-limit";
 
 const port = Number(process.env.PORT ?? 3000);
@@ -21,6 +23,12 @@ try {
   await Sentry.flush(2000);
   throw err;
 }
+
+// Nightly retention job: clears old email bodies and raw webhook payloads.
+startPruneJob();
+
+// Minute-by-minute worker: delivers emails scheduled for a future send time.
+startScheduledSendJob();
 
 // Drop-in replacement for the previous Next.js app: identical /api/* paths,
 // JSON shapes, auth, and env, plus an HTMX dashboard. Business logic is reused
