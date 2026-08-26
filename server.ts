@@ -11,6 +11,7 @@ import * as h from "@/server/handlers";
 import { snsWebhook } from "@/server/webhooks";
 import * as ui from "@/server/ui";
 import { migrate } from "@/lib/migrate";
+import { startPruneJob } from "@/lib/prune";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -23,6 +24,9 @@ try {
   await Sentry.flush(2000);
   throw err;
 }
+
+// Nightly retention job: clears old email bodies and raw webhook payloads.
+startPruneJob();
 
 // Drop-in replacement for the previous Next.js app: identical /api/* paths,
 // JSON shapes, auth, and env, plus an HTMX dashboard. Business logic is reused

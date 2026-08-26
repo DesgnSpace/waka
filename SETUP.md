@@ -73,6 +73,7 @@ The application reads these variables. `.env.example` contains the same list and
 | `SES_CONFIGURATION_SET` | No | Account-wide SES configuration set attached to sends. Defaults to `waka-events`. | `waka-events` |
 | `SES_SNS_TOPIC_ARN` | No | If set, only signed SNS messages from this topic are accepted by the SES webhook. | `arn:aws:sns:us-east-1:123456789012:waka-events` |
 | `SENTRY_DSN` | No | Enables Sentry error reporting when non-empty. | `https://examplePublicKey@o0.ingest.sentry.io/0` |
+| `LOG_RETENTION_DAYS` | No | Days a sent email keeps its HTML/text body and raw webhook payloads. Each night a job clears those fields from older rows but keeps the rows, so log history stays. `0` disables the job and keeps everything. Defaults to `90`. | `90` |
 
 Do not put real credentials in `.env.example`, source control, a Dockerfile, or a container image. Use `.env` locally and a secret store in production.
 
