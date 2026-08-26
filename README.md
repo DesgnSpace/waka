@@ -77,6 +77,34 @@ Addresses that permanently bounced or were marked as spam are blocked per domain
 - Suppressions are scoped to the sending domain. One domain's blocks never affect another, even for the same recipient address.
 - Manage them per domain: `GET /api/domains/:id/suppressions` lists blocked addresses, `DELETE /api/domains/:id/suppressions/:email` removes one.
 
+## Per-key limits
+
+Each API key can carry its own caps so a leaked or noisy key is contained without throttling the rest of the account. Both fields are optional; a key with no limits behaves exactly as before.
+
+- `rateLimitPerMinute` — maximum sends per rolling 60-second window for that key.
+- `dailySendLimit` — maximum sends per calendar day for that key.
+
+Set them when creating a key and change them later:
+
+```bash
+curl -X POST https://your-host.example/api/api-keys \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"domainId":"<uuid>","keyName":"mobile","rateLimitPerMinute":30,"dailySendLimit":500}'
+
+curl -X PUT https://your-host.example/api/api-keys/<key-id> \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"rateLimitPerMinute":10,"dailySendLimit":null}'
+```
+
+Pass `null` to clear a limit. The dashboard's key creation form exposes the same two fields. Limits are enforced on `POST /api/emails` in addition to the existing account (`60/min` + `1,000/day` by default) and IP (`20/min`) limits — the strictest limit that applies wins. When a per-key limit is what rejected the request the error says so explicitly:
+
+- per-minute: `This API key has reached its per-minute limit. Wait a moment and try again, or raise the limit for this key.` (`429`)
+- per-day: `This API key has reached its daily sending limit.` (`429`)
+
+The dashboard's test-email action is rate-limited by the same account and IP buckets and counts against the daily quota.
+
 ## Routes
 
 - `GET /api/health`

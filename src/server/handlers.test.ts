@@ -72,7 +72,7 @@ mock.module("@/lib/rate-limit", () => ({
   checkRateLimit: async () => ({ allowed: true }),
   requestAddress: () => "127.0.0.1",
 }));
-mock.module("@/lib/quotas", () => ({ reserveDailySend: async () => true }));
+mock.module("@/lib/quotas", () => ({ reserveDailySend: async () => true, reserveApiKeyDailySend: async () => true }));
 
 const { sendEmailHandler } = await import("./handlers");
 

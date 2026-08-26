@@ -38,3 +38,28 @@ export async function reserveDailySend(userId: string): Promise<boolean> {
     return result.rowCount === 1;
   });
 }
+
+export async function reserveApiKeyDailySend(apiKeyId: string, limit: number): Promise<boolean> {
+  return transaction(async (client) => {
+    const result = await client.query(
+      `INSERT INTO api_key_send_usage (api_key_id, window_started_at, send_count)
+       VALUES ($1, date_trunc('day', NOW()), 1)
+       ON CONFLICT (api_key_id) DO UPDATE SET
+         window_started_at = CASE
+           WHEN api_key_send_usage.window_started_at < date_trunc('day', NOW())
+             THEN date_trunc('day', NOW())
+           ELSE api_key_send_usage.window_started_at
+         END,
+         send_count = CASE
+           WHEN api_key_send_usage.window_started_at < date_trunc('day', NOW())
+             THEN 1
+           ELSE api_key_send_usage.send_count + 1
+         END
+       WHERE api_key_send_usage.window_started_at < date_trunc('day', NOW())
+          OR api_key_send_usage.send_count < $2
+       RETURNING send_count`,
+      [apiKeyId, limit],
+    );
+    return result.rowCount === 1;
+  });
+}

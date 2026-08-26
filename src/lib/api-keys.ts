@@ -34,6 +34,8 @@ function publicApiKey(row: ApiKeyPublicRow): PublicApiKey {
     key_name: row.key_name,
     key_prefix: row.key_prefix,
     permissions: parsePermissions(row.permissions),
+    rate_limit_per_minute: (row as unknown as { rate_limit_per_minute?: number | null }).rate_limit_per_minute ?? null,
+    daily_send_limit: (row as unknown as { daily_send_limit?: number | null }).daily_send_limit ?? null,
     last_used_at: row.last_used_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -44,9 +46,9 @@ export async function generateApiKey(
   userId: string,
   domainId: string,
   keyName: string,
-  permissions: string[] = ["send"]
+  permissions: string[] = ["send"],
+  limits: { rateLimitPerMinute?: number | null; dailySendLimit?: number | null } = {}
 ): Promise<ApiKeyWithKey> {
-  // Generate a secure API key with prefix
   const keyId = randomKeyPart();
   const keySecret = customAlphabet(
     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-",
@@ -54,16 +56,15 @@ export async function generateApiKey(
   )();
   const apiKey = `wka_${keyId}_${keySecret}`; // wka = Waka
 
-  // Hash the key for storage
   const keyHash = await bcrypt.hash(apiKey, 10);
 
   try {
     const result = await query<ApiKeyPublicRow>(
-      `INSERT INTO api_keys (user_id, domain_id, key_name, key_hash, key_prefix, permissions)
-       SELECT $1, d.id, $3, $4, $5, $6
+      `INSERT INTO api_keys (user_id, domain_id, key_name, key_hash, key_prefix, permissions, rate_limit_per_minute, daily_send_limit)
+       SELECT $1, d.id, $3, $4, $5, $6, $7, $8
        FROM domains d
        WHERE d.id = $2 AND d.user_id = $1
-       RETURNING id, user_id, domain_id, key_name, key_prefix, permissions, last_used_at, created_at, updated_at`,
+       RETURNING id, user_id, domain_id, key_name, key_prefix, permissions, rate_limit_per_minute, daily_send_limit, last_used_at, created_at, updated_at`,
       [
         userId,
         domainId,
@@ -71,6 +72,8 @@ export async function generateApiKey(
         keyHash,
         `wka_${keyId}`,
         JSON.stringify(permissions),
+        limits.rateLimitPerMinute ?? null,
+        limits.dailySendLimit ?? null,
       ]
     );
 
@@ -111,7 +114,8 @@ export async function verifyApiKey(
 
   const result = await query<ApiKeyVerificationRow>(
     `SELECT ak.id, ak.user_id, ak.domain_id, ak.key_name, ak.key_hash,
-            ak.key_prefix, ak.permissions, ak.last_used_at, ak.created_at, ak.updated_at
+            ak.key_prefix, ak.permissions, ak.rate_limit_per_minute, ak.daily_send_limit,
+            ak.last_used_at, ak.created_at, ak.updated_at
      FROM api_keys ak
      JOIN domains d ON d.id = ak.domain_id AND d.user_id = ak.user_id
      WHERE ak.key_prefix = $1`,
@@ -139,7 +143,8 @@ export async function getUserApiKeys(
     const result = await query<ApiKeyWithDomainRow>(
       `SELECT 
         ak.id, ak.user_id, ak.domain_id, ak.key_name, ak.key_prefix,
-        ak.permissions, ak.last_used_at, ak.created_at, ak.updated_at,
+        ak.permissions, ak.rate_limit_per_minute, ak.daily_send_limit,
+        ak.last_used_at, ak.created_at, ak.updated_at,
         d.domain as domain_name
       FROM api_keys ak
       JOIN domains d ON ak.domain_id = d.id AND d.user_id = ak.user_id
@@ -164,7 +169,8 @@ export async function getDomainApiKeys(
   try {
     const result = await query<ApiKeyPublicRow>(
       `SELECT ak.id, ak.user_id, ak.domain_id, ak.key_name, ak.key_prefix,
-              ak.permissions, ak.last_used_at, ak.created_at, ak.updated_at
+              ak.permissions, ak.rate_limit_per_minute, ak.daily_send_limit,
+              ak.last_used_at, ak.created_at, ak.updated_at
        FROM api_keys ak
        JOIN domains d ON d.id = ak.domain_id AND d.user_id = ak.user_id
        WHERE ak.domain_id = $1 AND ak.user_id = $2
@@ -212,5 +218,36 @@ export async function updateApiKeyPermissions(
     }
   } catch (error: unknown) {
     throw new Error(`Couldn't update API key permissions: ${errorMessage(error)}`);
+  }
+}
+
+export async function updateApiKeyLimits(
+  keyId: string,
+  userId: string,
+  limits: { rateLimitPerMinute?: number | null; dailySendLimit?: number | null }
+): Promise<void> {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  let idx = 1;
+  if ("rateLimitPerMinute" in limits) {
+    sets.push(`rate_limit_per_minute = $${idx++}`);
+    params.push(limits.rateLimitPerMinute ?? null);
+  }
+  if ("dailySendLimit" in limits) {
+    sets.push(`daily_send_limit = $${idx++}`);
+    params.push(limits.dailySendLimit ?? null);
+  }
+  if (sets.length === 0) return;
+  params.push(keyId, userId);
+  try {
+    const result = await query(
+      `UPDATE api_keys SET ${sets.join(", ")} WHERE id = $${idx++} AND user_id = $${idx++}`,
+      params
+    );
+    if (result.rowCount === 0) {
+      throw new Error("API key not found or you don't have access.");
+    }
+  } catch (error: unknown) {
+    throw new Error(`Couldn't update API key: ${errorMessage(error)}`);
   }
 }

@@ -22,6 +22,7 @@ import {
   generateApiKey,
   getUserApiKeys,
   deleteApiKey,
+  updateApiKeyLimits,
   updateApiKeyPermissions,
 } from "@/lib/api-keys";
 import { sendEmail } from "@/lib/ses";
@@ -33,7 +34,7 @@ import {
 import { query, type DbRow } from "@/lib/database";
 import { errorCode, errorHttpStatus, errorMessage, errorName } from "@/lib/errors";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
-import { reserveDailySend } from "@/lib/quotas";
+import { reserveApiKeyDailySend, reserveDailySend } from "@/lib/quotas";
 import {
   completeIdempotencyKey,
   releaseIdempotencyKey,
@@ -234,14 +235,21 @@ export async function removeSuppressionHandler(req: Req): Promise<Response> {
 // api keys
 // ----------------------------------------------------------------------------
 
+const limitField = z.number().int().min(1).max(1_000_000).nullable().optional();
 const createApiKeySchema = z.object({
   domainId: z.string().uuid("Invalid domain ID"),
   keyName: z.string().trim().min(1, "Key name is required").max(255),
   permissions: z.array(z.enum(["send", "receive", "webhooks"])).max(3).optional().default(["send"]),
+  rateLimitPerMinute: limitField,
+  dailySendLimit: limitField,
 });
 
 const updateApiKeySchema = z.object({
-  permissions: z.array(z.enum(["send", "receive", "webhooks"])).min(1).max(3),
+  permissions: z.array(z.enum(["send", "receive", "webhooks"])).min(1).max(3).optional(),
+  rateLimitPerMinute: limitField,
+  dailySendLimit: limitField,
+}).refine((v) => v.permissions !== undefined || v.rateLimitPerMinute !== undefined || v.dailySendLimit !== undefined, {
+  message: "Provide at least one field to update.",
 });
 
 export async function listApiKeys(req: Req): Promise<Response> {
@@ -252,7 +260,8 @@ export async function listApiKeys(req: Req): Promise<Response> {
 
 export async function createApiKey(req: Req): Promise<Response> {
   const user = requireUser(req);
-  const { domainId, keyName, permissions } = createApiKeySchema.parse(await jsonBody(req));
+  const { domainId, keyName, permissions, rateLimitPerMinute, dailySendLimit } =
+    createApiKeySchema.parse(await jsonBody(req));
 
   const domain = await getDomainById(domainId, user.id);
   if (!domain) {
@@ -262,7 +271,10 @@ export async function createApiKey(req: Req): Promise<Response> {
     return json({ error: "Verify the domain before creating API keys." }, 400);
   }
 
-  const apiKey = await generateApiKey(user.id, domainId, keyName, permissions);
+  const apiKey = await generateApiKey(user.id, domainId, keyName, permissions, {
+    rateLimitPerMinute: rateLimitPerMinute ?? null,
+    dailySendLimit: dailySendLimit ?? null,
+  });
   return json({
     success: true,
     data: { apiKey },
@@ -272,9 +284,18 @@ export async function createApiKey(req: Req): Promise<Response> {
 
 export async function updateApiKey(req: Req): Promise<Response> {
   const user = requireUser(req);
-  const { permissions } = updateApiKeySchema.parse(await jsonBody(req));
-  await updateApiKeyPermissions(pathUuid(req), user.id, permissions);
-  return json({ success: true, message: "API key permissions updated." });
+  const { permissions, rateLimitPerMinute, dailySendLimit } =
+    updateApiKeySchema.parse(await jsonBody(req));
+  if (permissions !== undefined) {
+    await updateApiKeyPermissions(pathUuid(req), user.id, permissions);
+  }
+  if (rateLimitPerMinute !== undefined || dailySendLimit !== undefined) {
+    await updateApiKeyLimits(pathUuid(req), user.id, {
+      ...(rateLimitPerMinute !== undefined ? { rateLimitPerMinute } : {}),
+      ...(dailySendLimit !== undefined ? { dailySendLimit } : {}),
+    });
+  }
+  return json({ success: true, message: "API key updated." });
 }
 
 export async function removeApiKey(req: Req): Promise<Response> {
@@ -441,10 +462,21 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
   }
 
   try {
+    if (apiKey.rate_limit_per_minute != null) {
+      const perKeyRate = await checkRateLimit(`send:key:${apiKey.id}`, apiKey.rate_limit_per_minute, 60_000);
+      if (!perKeyRate.allowed) {
+        throw new HttpError(429, { error: "This API key has reached its per-minute limit. Wait a moment and try again, or raise the limit for this key." });
+      }
+    }
     const sendRate = await checkRateLimit(`send:${apiKey.user_id}`, 60, 60_000);
     const ipRate = await checkRateLimit(`send-ip:${requestAddress(req)}`, 20, 60_000);
     if (!sendRate.allowed || !ipRate.allowed) {
       throw new HttpError(429, { error: "Sending too quickly. Try again later." });
+    }
+    if (apiKey.daily_send_limit != null) {
+      if (!(await reserveApiKeyDailySend(apiKey.id, apiKey.daily_send_limit))) {
+        throw new HttpError(429, { error: "This API key has reached its daily sending limit." });
+      }
     }
     if (!(await reserveDailySend(apiKey.user_id))) {
       throw new HttpError(429, { error: "Daily sending limit reached." });
