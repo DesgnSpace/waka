@@ -1,6 +1,7 @@
 import { json, jsonBody, type Req } from "./http";
 import { transaction } from "@/lib/database";
 import { validateSnsMessage, confirmSubscription, type SnsMessage } from "@/lib/sns";
+import { ENGAGEMENT_EVENT_TYPES, eventStatus, resolveStatus } from "@/lib/ses-events";
 import { z } from "zod";
 
 const sesMessageSchema = z.object({
@@ -40,7 +41,10 @@ const snsMessageSchema = z.object({
   UnsubscribeURL: z.string().url().optional(),
 });
 
-async function processSESEvent(message: SESMessage): Promise<void> {
+export async function processSESEvent(
+  message: SESMessage,
+  snsMessageId: string
+): Promise<void> {
   const eventType = (message.eventType ?? message.notificationType ?? "").toLowerCase();
   const eventData = JSON.stringify(message);
 
@@ -64,55 +68,60 @@ async function processSESEvent(message: SESMessage): Promise<void> {
 
     const emailLog = emailResult.rows[0];
 
+    // The unique index on sns_message_id admits exactly one processing pass
+    // per SNS notification, across concurrent containers; a redelivery loses
+    // this insert and stops here.
+    const gate = await client.query(
+      `INSERT INTO webhook_events (email_log_id, event_type, event_data, processed, sns_message_id)
+       VALUES ($1, $2, $3, true, $4)
+       ON CONFLICT (sns_message_id) DO NOTHING`,
+      [emailLog.id, eventType, eventData, snsMessageId]
+    );
+    if ((gate.rowCount ?? 0) === 0) return;
+
     // Engagement events fire once PER open/click — record every one in
     // email_events (counts are derived on read); never overwrite delivery status.
-    if (eventType === "open" || eventType === "click") {
+    if (ENGAGEMENT_EVENT_TYPES.has(eventType)) {
       const isClick = eventType === "click";
       const ev = isClick ? message.click : message.open;
       await client.query(
         "INSERT INTO email_events (email_log_id, type, link, ip_address, user_agent) VALUES ($1, $2, $3, $4, $5)",
         [emailLog.id, eventType, isClick ? message.click?.link ?? null : null, ev?.ipAddress ?? null, ev?.userAgent ?? null]
       );
-      await client.query(
-        "INSERT INTO webhook_events (email_log_id, event_type, event_data, processed) VALUES ($1, $2, $3, $4)",
-        [emailLog.id, eventType, eventData, true]
-      );
       return;
     }
 
-    // Delivery-lifecycle events update the message status.
-    let newStatus = emailLog.status;
+    const nextStatus = eventStatus(eventType);
+    if (!nextStatus) return;
+
+    const target = resolveStatus(emailLog.status, nextStatus);
+    if (!target) return;
+
     let errorMessage: string | null = null;
     switch (eventType) {
-      case "delivery":
-        newStatus = "delivered";
-        break;
       case "bounce":
-        newStatus = "bounced";
         errorMessage =
           message.bounce?.bouncedRecipients
             .map((r) => `${r.emailAddress}: ${r.diagnosticCode}`)
             .join("; ") ?? null;
         break;
       case "complaint":
-        newStatus = "complained";
         errorMessage = `Complaint from: ${message.complaint?.complainedRecipients
           .map((r) => r.emailAddress)
           .join(", ")}`;
         break;
       case "reject":
-        newStatus = "failed";
         errorMessage = "Email rejected by SES";
         break;
     }
 
+    // Re-check the rank atomically: a concurrent notification may have
+    // advanced the status after this transaction read it.
     await client.query(
-      "UPDATE email_logs SET status = $1, error_message = $2, webhook_data = $3 WHERE id = $4",
-      [newStatus, errorMessage, eventData, emailLog.id]
-    );
-    await client.query(
-      "INSERT INTO webhook_events (email_log_id, event_type, event_data, processed) VALUES ($1, $2, $3, $4)",
-      [emailLog.id, eventType, eventData, true]
+      `UPDATE email_logs
+       SET status = $1, error_message = $2, webhook_data = $3
+       WHERE id = $4 AND email_status_rank(status) < email_status_rank($1)`,
+      [target, errorMessage, eventData, emailLog.id]
     );
 
     // Suppressions are per-domain and idempotent. Only permanent bounces and
@@ -184,7 +193,7 @@ export async function snsWebhook(req: Req): Promise<Response> {
     } catch {
       return json({ error: "Invalid SES event" }, 400);
     }
-    await processSESEvent(message);
+    await processSESEvent(message, body.MessageId);
     return json({ message: "Event processed" });
   }
 
