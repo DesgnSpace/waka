@@ -141,10 +141,10 @@ export async function sendRawEmail(options: SendEmailOptions): Promise<string> {
     bcc,
     subject,
     html,
-    text,
     attachments = [],
     replyTo,
   } = options;
+  const text = options.text || (options.html ? htmlToText(options.html) : undefined);
 
   for (const addr of [from, ...to, ...(cc ?? []), ...(replyTo ?? [])]) {
     assertNoCRLF(addr, "address");
