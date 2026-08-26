@@ -316,6 +316,8 @@ const decodedBase64Bytes = (b64: string) =>
 const SEND_IN_PROGRESS =
   "An email with this Idempotency-Key is still being processed. Wait a moment and retry.";
 
+const MAX_BATCH_SIZE = 100;
+
 function jsonResponse(data: unknown, status: number, extraHeaders: Record<string, string>): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -405,30 +407,20 @@ const sendEmailSchema = z
     { message: "Attachments must be 10 MB or smaller in total." }
   );
 
-export async function sendEmailHandler(req: Req): Promise<Response> {
-  const apiKey = await requireApiKey(req);
-  if (!apiKey.permissions.includes("send")) {
-    return json({ error: "This API key can't send email. Create a key with send permission." }, 403);
-  }
+type ValidatedSend = z.infer<typeof sendEmailSchema>;
 
-  const idempotencyKey = idempotencyKeyOf(req);
-
-  const { from, to, cc, bcc, subject, html, text, attachments, reply_to, tags } =
-    sendEmailSchema.parse(await jsonBody(req));
-
-  const domain = await getDomainById(apiKey.domain_id, apiKey.user_id);
-  if (!domain) return json({ error: "Domain not found" }, 404);
-  if (domain.status !== "verified") return json({ error: "Domain isn't verified. Verify DNS and try again." }, 400);
+async function deliverOne(
+  apiKey: { id: string; user_id: string; rate_limit_per_minute: number | null; daily_send_limit: number | null },
+  domain: { id: string; domain: string },
+  data: ValidatedSend,
+  reqForAddress: Request,
+): Promise<{ id: string; from: string; to: string[]; created_at: string }> {
+  const { from, to, cc, bcc, subject, html, text, attachments, reply_to, tags } = data;
 
   if (bareAddress(from).split("@")[1]?.toLowerCase() !== domain.domain.toLowerCase()) {
-    return json({ error: `From email must use the domain ${domain.domain}.` }, 400);
+    throw new HttpError(400, { error: `From email must use the domain ${domain.domain}.` });
   }
 
-  // Suppression check sits after validation but before idempotency, rate limits,
-  // quota, and SES. Blocked recipients never burn quota, rate-limit capacity,
-  // or an idempotency claim, and the multi-recipient rule is all-or-nothing:
-  // if any recipient is suppressed the entire send is rejected so no partial
-  // delivery occurs.
   {
     const allRecipients = [...to, ...(cc ?? []), ...(bcc ?? [])].map((a) => bareAddress(a));
     const suppressed = await findSuppressed(domain.id, allRecipients);
@@ -438,127 +430,68 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
         suppressed.length === 1
           ? `Recipient ${list} previously bounced or was marked as spam for this domain and won't receive mail. Remove it from the suppression list to send again.`
           : `Recipients ${list} previously bounced or were marked as spam for this domain and won't receive mail. Remove them from the suppression list to send again.`;
-      return json({ error, message: error, suppressed }, 400);
+      throw new HttpError(400, { error, message: error, suppressed });
     }
   }
 
-  // Claimed before rate limits so a replay never consumes quota again.
-  let claim: { id: string } | null = null;
-  if (idempotencyKey) {
-    const reservation = await reserveIdempotencyKey(apiKey.id, idempotencyKey);
-    if (reservation.kind === "replay") {
-      return jsonResponse(reservation.body, reservation.status, {
-        "idempotency-replayed": "true",
-      });
+  if (apiKey.rate_limit_per_minute != null) {
+    const perKeyRate = await checkRateLimit(`send:key:${apiKey.id}`, apiKey.rate_limit_per_minute, 60_000);
+    if (!perKeyRate.allowed) {
+      throw new HttpError(429, { error: "This API key has reached its per-minute limit. Wait a moment and try again, or raise the limit for this key." });
     }
-    if (reservation.kind === "conflict") {
-      return jsonResponse(
-        { error: SEND_IN_PROGRESS, message: SEND_IN_PROGRESS },
-        409,
-        { "retry-after": "1" }
-      );
+  }
+  const sendRate = await checkRateLimit(`send:${apiKey.user_id}`, 60, 60_000);
+  const ipRate = await checkRateLimit(`send-ip:${requestAddress(reqForAddress)}`, 20, 60_000);
+  if (!sendRate.allowed || !ipRate.allowed) {
+    throw new HttpError(429, { error: "Sending too quickly. Try again later." });
+  }
+  if (apiKey.daily_send_limit != null) {
+    if (!(await reserveApiKeyDailySend(apiKey.id, apiKey.daily_send_limit))) {
+      throw new HttpError(429, { error: "This API key has reached its daily sending limit." });
     }
-    claim = reservation;
+  }
+  if (!(await reserveDailySend(apiKey.user_id))) {
+    throw new HttpError(429, { error: "Daily sending limit reached." });
   }
 
+  const sesAttachments = attachments?.map((att) => ({
+    filename: att.filename,
+    content: att.content,
+    contentType: att.contentType || att.content_type || "application/octet-stream",
+  }));
+
+  const attachmentMeta = (attachments ?? []).map((a) => ({
+    filename: a.filename,
+    contentType: a.contentType || a.content_type || "application/octet-stream",
+    size: decodedBase64Bytes(a.content),
+  }));
+
+  let messageId: string;
   try {
-    if (apiKey.rate_limit_per_minute != null) {
-      const perKeyRate = await checkRateLimit(`send:key:${apiKey.id}`, apiKey.rate_limit_per_minute, 60_000);
-      if (!perKeyRate.allowed) {
-        throw new HttpError(429, { error: "This API key has reached its per-minute limit. Wait a moment and try again, or raise the limit for this key." });
-      }
-    }
-    const sendRate = await checkRateLimit(`send:${apiKey.user_id}`, 60, 60_000);
-    const ipRate = await checkRateLimit(`send-ip:${requestAddress(req)}`, 20, 60_000);
-    if (!sendRate.allowed || !ipRate.allowed) {
-      throw new HttpError(429, { error: "Sending too quickly. Try again later." });
-    }
-    if (apiKey.daily_send_limit != null) {
-      if (!(await reserveApiKeyDailySend(apiKey.id, apiKey.daily_send_limit))) {
-        throw new HttpError(429, { error: "This API key has reached its daily sending limit." });
-      }
-    }
-    if (!(await reserveDailySend(apiKey.user_id))) {
-      throw new HttpError(429, { error: "Daily sending limit reached." });
-    }
-
-    const sesAttachments = attachments?.map((att) => ({
-      filename: att.filename,
-      content: att.content,
-      contentType: att.contentType || att.content_type || "application/octet-stream",
-    }));
-
-    // Persist attachment metadata only — never the raw base64 payload.
-    const attachmentMeta = (attachments ?? []).map((a) => ({
-      filename: a.filename,
-      contentType: a.contentType || a.content_type || "application/octet-stream",
-      size: decodedBase64Bytes(a.content),
-    }));
-
-    let messageId: string;
+    messageId = await sendEmail({
+      from,
+      to,
+      cc,
+      bcc,
+      subject,
+      html,
+      text,
+      attachments: sesAttachments,
+      replyTo: reply_to,
+      tags,
+    });
+  } catch (err) {
+    const name = errorName(err);
+    const reason = errorMessage(err);
+    const statusCode = errorHttpStatus(err) ?? 0;
+    console.error("SES send failed:", name, reason);
+    const detail = reason || "Email provider rejected the message.";
     try {
-      messageId = await sendEmail({
-        from,
-        to,
-        cc,
-        bcc,
-        subject,
-        html,
-        text,
-        attachments: sesAttachments,
-        replyTo: reply_to,
-        tags,
-      });
-    } catch (err) {
-      // Surface the provider's real reason (e.g. "Email address is not verified",
-      // "AccessDenied") instead of a blank 500, so the caller can act on it.
-      const name = errorName(err);
-      const reason = errorMessage(err);
-      const statusCode = errorHttpStatus(err) ?? 0;
-      console.error("SES send failed:", name, reason);
-
-      const detail = reason || "Email provider rejected the message.";
-      try {
-        await query(
-          `INSERT INTO email_logs (
+      await query(
+        `INSERT INTO email_logs (
             api_key_id, domain_id, from_email, to_emails, cc_emails, bcc_emails,
             subject, html_content, text_content, attachments, status, ses_message_id, error_message
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-          [
-            apiKey.id,
-            domain.id,
-            from,
-            JSON.stringify(to),
-            JSON.stringify(cc || []),
-            JSON.stringify(bcc || []),
-            subject,
-            html,
-            text,
-            JSON.stringify(attachmentMeta),
-            "failed",
-            null,
-            name ? `${name}: ${detail}` : detail,
-          ]
-        );
-      } catch (logError) {
-        console.error("Failed to record rejected email:", logError);
-      }
-
-      const status = statusCode >= 400 && statusCode < 500 ? statusCode : 502;
-      throw new HttpError(status, {
-        error: detail,
-        message: detail,
-        code: name,
-      });
-    }
-
-    try {
-      const result = await query<{ id: string }>(
-        `INSERT INTO email_logs (
-          api_key_id, domain_id, from_email, to_emails, cc_emails, bcc_emails,
-          subject, html_content, text_content, attachments, status, ses_message_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        RETURNING id`,
         [
           apiKey.id,
           domain.id,
@@ -570,48 +503,220 @@ export async function sendEmailHandler(req: Req): Promise<Response> {
           html,
           text,
           JSON.stringify(attachmentMeta),
-          "sent",
-          messageId,
+          "failed",
+          null,
+          name ? `${name}: ${detail}` : detail,
         ]
       );
-      const emailLogId = result.rows[0]?.id;
-      const body = {
-        id: emailLogId || messageId,
+    } catch (logError) {
+      console.error("Failed to record rejected email:", logError);
+    }
+    const status = statusCode >= 400 && statusCode < 500 ? statusCode : 502;
+    throw new HttpError(status, { error: detail, message: detail, code: name });
+  }
+
+  try {
+    const result = await query<{ id: string }>(
+      `INSERT INTO email_logs (
+          api_key_id, domain_id, from_email, to_emails, cc_emails, bcc_emails,
+          subject, html_content, text_content, attachments, status, ses_message_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        RETURNING id`,
+      [
+        apiKey.id,
+        domain.id,
         from,
-        to,
-        created_at: new Date().toISOString(),
-      };
-      if (claim) {
-        await completeIdempotencyKey(claim.id, 200, body);
-        claim = null;
-      }
-      return json(body);
-    } catch (error) {
-      console.error("Failed to record sent email:", error);
-      if (claim) {
-        // The message was handed to SES, so the stored outcome must be
-        // success — otherwise a retry would send it a second time.
+        JSON.stringify(to),
+        JSON.stringify(cc || []),
+        JSON.stringify(bcc || []),
+        subject,
+        html,
+        text,
+        JSON.stringify(attachmentMeta),
+        "sent",
+        messageId,
+      ]
+    );
+    const emailLogId = result.rows[0]?.id;
+    return {
+      id: emailLogId || messageId,
+      from,
+      to,
+      created_at: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error("Failed to record sent email:", error);
+    throw new HttpError(500, {
+      error: "Email sent but could not be recorded.",
+      message: "Email sent but could not be recorded.",
+      id: messageId,
+      from,
+      to,
+      created_at: new Date().toISOString(),
+    });
+  }
+}
+
+export async function sendEmailHandler(req: Req): Promise<Response> {
+  const apiKey = await requireApiKey(req);
+  if (!apiKey.permissions.includes("send")) {
+    return json({ error: "This API key can't send email. Create a key with send permission." }, 403);
+  }
+
+  const idempotencyKey = idempotencyKeyOf(req);
+  const parsed = sendEmailSchema.parse(await jsonBody(req));
+
+  const domain = await getDomainById(apiKey.domain_id, apiKey.user_id);
+  if (!domain) return json({ error: "Domain not found" }, 404);
+  if (domain.status !== "verified") return json({ error: "Domain isn't verified. Verify DNS and try again." }, 400);
+
+  let claim: { id: string } | null = null;
+  if (idempotencyKey) {
+    const reservation = await reserveIdempotencyKey(apiKey.id, idempotencyKey);
+    if (reservation.kind === "replay") {
+      return jsonResponse(reservation.body, reservation.status, { "idempotency-replayed": "true" });
+    }
+    if (reservation.kind === "conflict") {
+      return jsonResponse({ error: SEND_IN_PROGRESS, message: SEND_IN_PROGRESS }, 409, { "retry-after": "1" });
+    }
+    claim = reservation;
+  }
+
+  try {
+    const result = await deliverOne(apiKey, domain, parsed, req);
+    if (claim) {
+      await completeIdempotencyKey(claim.id, 200, result);
+      claim = null;
+    }
+    return json(result);
+  } catch (err) {
+    if (claim) {
+      if (
+        err instanceof HttpError &&
+        err.status === 500 &&
+        typeof (err.body as Record<string, unknown>)?.error === "string" &&
+        String((err.body as Record<string, unknown>).error).includes("could not be recorded")
+      ) {
+        const b = err.body as Record<string, unknown>;
+        const success = { id: b.id, from: b.from, to: b.to, created_at: b.created_at };
         try {
-          await completeIdempotencyKey(claim.id, 200, {
-            id: messageId,
-            from,
-            to,
-            created_at: new Date().toISOString(),
-          });
+          await completeIdempotencyKey(claim.id, 200, success);
         } catch (completeError) {
           console.error("Failed to store idempotent outcome:", completeError);
         }
-        claim = null;
+      } else {
+        await releaseIdempotencyKey(claim.id);
       }
-      throw new HttpError(500, {
-        error: "Email sent but could not be recorded.",
-        message: "Email sent but could not be recorded.",
-      });
     }
-  } catch (err) {
-    if (claim) await releaseIdempotencyKey(claim.id);
+    if (err instanceof HttpError && err.status === 400) {
+      return json(err.body, 400);
+    }
     throw err;
   }
+}
+
+export async function sendBatchHandler(req: Req): Promise<Response> {
+  const apiKey = await requireApiKey(req);
+  if (!apiKey.permissions.includes("send")) {
+    return json({ error: "This API key can't send email. Create a key with send permission." }, 403);
+  }
+
+  const idempotencyKey = idempotencyKeyOf(req);
+  let claim: { id: string } | null = null;
+  if (idempotencyKey) {
+    const reservation = await reserveIdempotencyKey(apiKey.id, idempotencyKey);
+    if (reservation.kind === "replay") {
+      return jsonResponse(reservation.body, reservation.status, { "idempotency-replayed": "true" });
+    }
+    if (reservation.kind === "conflict") {
+      return jsonResponse({ error: SEND_IN_PROGRESS, message: SEND_IN_PROGRESS }, 409, { "retry-after": "1" });
+    }
+    claim = reservation;
+  }
+
+  const rawBody = await jsonBody(req);
+  if (!Array.isArray(rawBody)) {
+    if (claim) await releaseIdempotencyKey(claim.id);
+    throw new HttpError(400, { error: "Request body must be a JSON array of email objects." });
+  }
+  if (rawBody.length === 0) {
+    if (claim) await releaseIdempotencyKey(claim.id);
+    throw new HttpError(400, { error: "Batch must contain at least one email." });
+  }
+  if (rawBody.length > MAX_BATCH_SIZE) {
+    if (claim) await releaseIdempotencyKey(claim.id);
+    throw new HttpError(400, { error: `Batch size exceeds maximum of ${MAX_BATCH_SIZE} emails.` });
+  }
+
+  const domain = await getDomainById(apiKey.domain_id, apiKey.user_id);
+  if (!domain) {
+    if (claim) await releaseIdempotencyKey(claim.id);
+    return json({ error: "Domain not found" }, 404);
+  }
+  if (domain.status !== "verified") {
+    if (claim) await releaseIdempotencyKey(claim.id);
+    return json({ error: "Domain isn't verified. Verify DNS and try again." }, 400);
+  }
+
+  const results: Array<Record<string, unknown>> = [];
+  let hasSuccess = false;
+  let hasError = false;
+
+  for (let i = 0; i < rawBody.length; i++) {
+    const raw = rawBody[i];
+    let parsed: ValidatedSend;
+    try {
+      parsed = sendEmailSchema.parse(raw);
+    } catch (err) {
+      hasError = true;
+      if (err instanceof z.ZodError) {
+        const reasons = err.issues.map((iss) => {
+          const path = iss.path.join(".");
+          return path ? `${path}: ${iss.message}` : iss.message;
+        });
+        const reason = reasons.length ? reasons.join("; ") : "Invalid request data";
+        results.push({ error: reason, message: reason, statusCode: 422, details: err.issues });
+      } else {
+        results.push({ error: errorMessage(err), message: errorMessage(err), statusCode: 422 });
+      }
+      continue;
+    }
+
+    try {
+      const delivered = await deliverOne(apiKey, domain, parsed, req);
+      hasSuccess = true;
+      results.push(delivered as unknown as Record<string, unknown>);
+    } catch (err) {
+      hasError = true;
+      if (err instanceof HttpError) {
+        const body = err.body as Record<string, unknown>;
+        results.push({ statusCode: err.status, ...body });
+      } else if (err instanceof z.ZodError) {
+        const reasons = err.issues.map((iss) => {
+          const path = iss.path.join(".");
+          return path ? `${path}: ${iss.message}` : iss.message;
+        });
+        const reason = reasons.length ? reasons.join("; ") : "Invalid request data";
+        results.push({ error: reason, message: reason, statusCode: 422, details: err.issues });
+      } else {
+        const msg = errorMessage(err);
+        results.push({ error: msg, message: msg, statusCode: 500 });
+      }
+    }
+  }
+
+  const responseBody = { data: results };
+  const status = hasError && hasSuccess ? 207 : hasError ? 207 : 200;
+
+  if (claim) {
+    try {
+      await completeIdempotencyKey(claim.id, status, responseBody);
+    } catch (completeError) {
+      console.error("Failed to store idempotent batch outcome:", completeError);
+    }
+  }
+
+  return jsonResponse(responseBody, status, {});
 }
 
 export async function emailLogs(req: Req): Promise<Response> {

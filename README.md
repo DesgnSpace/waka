@@ -105,6 +105,30 @@ Pass `null` to clear a limit. The dashboard's key creation form exposes the same
 
 The dashboard's test-email action is rate-limited by the same account and IP buckets and counts against the daily quota.
 
+## Batch sending
+
+`POST /api/emails/batch` sends up to 100 emails in one request. The body is a JSON array where each element uses the same shape as `POST /api/emails` (`from`, `to`, `subject`, `html`/`text`, etc.). The endpoint is Resend-compatible (`POST /emails/batch`).
+
+- **Authentication and domain**: same `wka_` API key as single send; the key's domain must be verified and `from` on every item must match it. A missing or unverified domain fails the whole batch.
+- **Cap**: at most 100 items per request (`400` naming the limit when exceeded). The server also enforces a 15 MB JSON body ceiling, so the cap sits comfortably inside that limit for typical emails.
+- **Per-item checks**: each item runs the same validation, `from` domain check, suppression check, rate-limit and daily-quota checks, and SES send as the single endpoint. Suppressing or quota is evaluated before SES, so blocked items never burn quota.
+- **Rate and quota**: counted per email, not per request. A batch of 50 consumes 50 quota units and 50 points against the `60/min` account, `20/min` IP, and any per-key limits. When a quota or rate bucket empties mid-batch, remaining items fail individually with `429`.
+- **Concurrency**: items are sent sequentially to keep the small Postgres pool (`max 5`) from being exhausted. One batch holds at most one DB connection at a time.
+- **Partial failures**: the response always contains `data` in request order so the client can match items. Success entries carry `{id, from, to, created_at}`; failures carry `{error, message, statusCode}` plus `code` or `suppressed` when relevant. The overall status is `200` when every item succeeded and `207 Multi-Status` when some failed (including when all failed, so a mixed batch never looks like a total success or a single top-level error).
+- **Idempotency**: `Idempotency-Key` is supported per batch (same header as single send). A replay returns the stored batch response with `idempotency-replayed: true`; a concurrent retry gets `409`.
+
+Example:
+
+```bash
+curl -X POST https://your-host.example/api/emails/batch \
+  -H "Authorization: Bearer wka_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '[
+    {"from":"hello@example.com","to":["a@example.com"],"subject":"Hi A","text":"Hello A"},
+    {"from":"hello@example.com","to":["b@example.com"],"subject":"Hi B","text":"Hello B"}
+  ]'
+```
+
 ## Routes
 
 - `GET /api/health`
@@ -119,6 +143,7 @@ The dashboard's test-email action is rate-limited by the same account and IP buc
 - `GET|POST /api/api-keys`
 - `PUT|DELETE /api/api-keys/:id`
 - `POST /api/emails`
+- `POST /api/emails/batch`
 - `GET /api/emails/logs`
 - `GET /api/emails/:id`
 - `POST /api/webhooks/ses`

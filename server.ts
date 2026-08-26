@@ -77,6 +77,7 @@ const server = Bun.serve({
     "/api/api-keys": methods({ GET: h.listApiKeys, POST: h.createApiKey }),
     "/api/api-keys/:id": methods({ PUT: h.updateApiKey, DELETE: h.removeApiKey }),
     "/api/emails": methods({ POST: h.sendEmailHandler }),
+    "/api/emails/batch": methods({ POST: h.sendBatchHandler }),
     "/api/emails/logs": methods({ GET: h.emailLogs }),
     "/api/emails/:id": methods({ GET: h.getEmail }),
     "/api/webhooks/ses": methods({ POST: snsWebhook }),
