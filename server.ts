@@ -11,6 +11,7 @@ import * as h from "@/server/handlers";
 import { snsWebhook } from "@/server/webhooks";
 import * as ui from "@/server/ui";
 import { migrate } from "@/lib/migrate";
+import { bindServer } from "@/lib/rate-limit";
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -74,3 +75,4 @@ const server = Bun.serve({
 });
 
 console.log(`waka listening on http://${server.hostname}:${server.port}`);
+bindServer(server);
