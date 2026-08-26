@@ -30,7 +30,8 @@ import {
   normalizeDkimSelector,
   normalizeDomain,
 } from "@/lib/email-dns-readiness";
-import { query, type DbRow } from "@/lib/database";
+import { query, transaction, type DbRow } from "@/lib/database";
+import { createHealthChecker } from "@/lib/health-check";
 import { errorCode, errorHttpStatus, errorMessage, errorName } from "@/lib/errors";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 import { reserveDailySend } from "@/lib/quotas";
@@ -72,13 +73,11 @@ type WebhookEventRow = DbRow<{
 // health
 // ----------------------------------------------------------------------------
 
-export function health(): Response {
-  return json({
-    status: "healthy",
-    timestamp: new Date().toISOString(),
-    service: "Waka",
-    version: "1.0.0",
-  });
+const healthChecks = createHealthChecker((run) => transaction((client) => run(client)));
+
+export async function health(): Promise<Response> {
+  const report = await healthChecks.report();
+  return json(report, report.status === "healthy" ? 200 : 503);
 }
 
 // ----------------------------------------------------------------------------
