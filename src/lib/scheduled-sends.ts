@@ -266,8 +266,11 @@ export async function runScheduledSendTick(): Promise<TickResult> {
   return counts;
 }
 
-export function startScheduledSendJob(): void {
-  Bun.cron(CRON_SCHEDULE, async () => {
+// Registers the minute-by-minute worker and returns its handle so callers can
+// stop it. Bun never overlaps fires — the next one is scheduled only after the
+// previous tick settles — so a slow batch cannot stack ticks.
+export function startScheduledSendJob(): Bun.CronJob {
+  return Bun.cron(CRON_SCHEDULE, async () => {
     try {
       const { sent, retried, failed } = await runScheduledSendTick();
       if (sent + retried + failed > 0) {
