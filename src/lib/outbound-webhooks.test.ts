@@ -70,7 +70,8 @@ test("verifySignature accepts correct header and rejects tampered", () => {
   const sig = computeSignature(secret, ts, body);
   const header = buildSignatureHeader(sig);
   expect(verifySignature(secret, ts, body, header)).toBe(true);
-  expect(verifySignature(secret, ts, body, "v1=0" + sig.slice(1))).toBe(false);
+  const flipped = (sig[0] === "0" ? "1" : "0") + sig.slice(1);
+  expect(verifySignature(secret, ts, body, buildSignatureHeader(flipped))).toBe(false);
   expect(verifySignature(secret, (Number(ts) + 1).toString(), body, header)).toBe(false);
   expect(verifySignature("other-secret", ts, body, header)).toBe(false);
   expect(verifySignature(secret, ts, body + " ", header)).toBe(false);
