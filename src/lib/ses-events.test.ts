@@ -23,7 +23,7 @@ const EVENT_TYPES = ["send", "reject", "delivery", "bounce", "complaint"];
 // current status must be kept.
 const EXPECTED: Record<string, Record<string, EmailStatus | null>> = {
   "pending": { send: "sent", reject: "failed", delivery: "delivered", bounce: "bounced", complaint: "complained" },
-  "sent": { send: null, reject: null, delivery: "delivered", bounce: "bounced", complaint: "complained" },
+  "sent": { send: null, reject: "failed", delivery: "delivered", bounce: "bounced", complaint: "complained" },
   "failed": { send: null, reject: null, delivery: "delivered", bounce: "bounced", complaint: "complained" },
   "delivered": { send: null, reject: null, delivery: null, bounce: "bounced", complaint: "complained" },
   "bounced": { send: null, reject: null, delivery: null, bounce: null, complaint: "complained" },

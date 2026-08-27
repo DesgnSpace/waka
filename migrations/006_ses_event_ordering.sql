@@ -11,10 +11,10 @@ CREATE OR REPLACE FUNCTION email_status_rank(status TEXT) RETURNS INT AS $$
   SELECT CASE status
     WHEN 'pending' THEN 0
     WHEN 'sent' THEN 1
-    WHEN 'failed' THEN 1
-    WHEN 'delivered' THEN 2
-    WHEN 'bounced' THEN 3
-    WHEN 'complained' THEN 4
+    WHEN 'failed' THEN 2
+    WHEN 'delivered' THEN 3
+    WHEN 'bounced' THEN 4
+    WHEN 'complained' THEN 5
     ELSE -1
   END;
 $$ LANGUAGE sql IMMUTABLE;
