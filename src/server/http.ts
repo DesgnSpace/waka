@@ -74,8 +74,10 @@ export function pathUuid(req: Req, name = "id"): string {
   return z.string().uuid("Invalid identifier").parse(req.params[name]);
 }
 
+export const MAX_JSON_BODY_BYTES = 15 * 1024 * 1024;
+
 export async function jsonBody(req: Request): Promise<unknown> {
-  const maxBytes = 15 * 1024 * 1024;
+  const maxBytes = MAX_JSON_BODY_BYTES;
   const contentLength = req.headers.get("content-length");
   if (contentLength && /^\d+$/.test(contentLength) && Number(contentLength) > maxBytes) {
     throw new HttpError(413, { error: "Request body is too large." });
@@ -188,7 +190,7 @@ export function createCsrfToken(): string {
 }
 
 export function csrfCookie(token: string): string {
-  return `${CSRF_COOKIE}=${token}; Path=/; SameSite=Strict${secureFlag}; Max-Age=${CSRF_MAX_AGE}`;
+  return `${CSRF_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Strict${secureFlag}; Max-Age=${CSRF_MAX_AGE}`;
 }
 
 export function clearCsrfCookie(): string {

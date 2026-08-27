@@ -7,6 +7,9 @@ import { parseStringArray } from "./serialization";
 
 export type PublicApiKey = Omit<ApiKey, "key_hash">;
 
+const LAST_USED_THROTTLE_MS = 5 * 60 * 1000;
+const lastUsedAtCache = new Map<string, number>();
+
 const randomKeyPart = customAlphabet(
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
   8,
@@ -36,12 +39,11 @@ export class ExpiredApiKeyError extends Error {
 function parsePermissions(value: unknown): string[] {
   const raw = value == null ? ["send"] : parseStringArray(value, "permissions");
   const filtered = raw.filter((p) => (ALLOWED_PERMISSIONS as readonly string[]).includes(p));
-  // Legacy keys that only carried removed permissions remain without send
-  // rather than being widened to send.
   return filtered;
 }
 
 function publicApiKey(row: ApiKeyPublicRow): PublicApiKey {
+  const r = row as unknown as Record<string, unknown>;
   return {
     id: row.id,
     user_id: row.user_id,
@@ -49,7 +51,9 @@ function publicApiKey(row: ApiKeyPublicRow): PublicApiKey {
     key_name: row.key_name,
     key_prefix: row.key_prefix,
     permissions: parsePermissions(row.permissions),
-    expires_at: (row as unknown as { expires_at?: string | null }).expires_at ?? null,
+    expires_at: (r.expires_at as string | null) ?? null,
+    rate_limit_per_minute: (r.rate_limit_per_minute as number | null) ?? null,
+    daily_send_limit: (r.daily_send_limit as number | null) ?? null,
     last_used_at: row.last_used_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -61,36 +65,50 @@ export async function generateApiKey(
   domainId: string,
   keyName: string,
   permissions: string[] = ["send"],
-  expiresAt: string | null = null
+  opts: string | null | { expiresAt?: string | null; rateLimitPerMinute?: number | null; dailySendLimit?: number | null } = null,
 ): Promise<ApiKeyWithKey> {
-  // Generate a secure API key with prefix
   const keyId = randomKeyPart();
   const keySecret = customAlphabet(
     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-",
     32,
   )();
-  const apiKey = `wka_${keyId}_${keySecret}`; // wka = Waka
+  const apiKey = `wka_${keyId}_${keySecret}`;
 
-  // Hash the key for storage
   const keyHash = await bcrypt.hash(apiKey, 10);
 
   const sanitized = permissions.filter((p) => (ALLOWED_PERMISSIONS as readonly string[]).includes(p));
   const finalPermissions = sanitized.length ? sanitized : ["send"];
 
   let expiresAtIso: string | null = null;
-  if (expiresAt) {
-    const d = new Date(expiresAt);
-    if (isNaN(d.getTime())) throw new Error("Invalid expiry date.");
-    expiresAtIso = d.toISOString();
+  let rateLimitPerMinute: number | null = null;
+  let dailySendLimit: number | null = null;
+
+  if (typeof opts === "string") {
+    if (opts) {
+      const d = new Date(opts);
+      if (isNaN(d.getTime())) throw new Error("Invalid expiry date.");
+      expiresAtIso = d.toISOString();
+    }
+  } else if (opts && typeof opts === "object") {
+    const rawExpires = (opts as { expiresAt?: string | null }).expiresAt;
+    if (rawExpires) {
+      const d = new Date(rawExpires);
+      if (isNaN(d.getTime())) throw new Error("Invalid expiry date.");
+      expiresAtIso = d.toISOString();
+    }
+    rateLimitPerMinute = (opts as { rateLimitPerMinute?: number | null }).rateLimitPerMinute ?? null;
+    dailySendLimit = (opts as { dailySendLimit?: number | null }).dailySendLimit ?? null;
+  } else if (opts === null) {
+    // no expiry, no limits
   }
 
   try {
     const result = await query<ApiKeyPublicRow>(
-      `INSERT INTO api_keys (user_id, domain_id, key_name, key_hash, key_prefix, permissions, expires_at)
-       SELECT $1, d.id, $3, $4, $5, $6, $7
+      `INSERT INTO api_keys (user_id, domain_id, key_name, key_hash, key_prefix, permissions, expires_at, rate_limit_per_minute, daily_send_limit)
+       SELECT $1, d.id, $3, $4, $5, $6, $7, $8, $9
        FROM domains d
        WHERE d.id = $2 AND d.user_id = $1
-       RETURNING id, user_id, domain_id, key_name, key_prefix, permissions, expires_at, last_used_at, created_at, updated_at`,
+       RETURNING id, user_id, domain_id, key_name, key_prefix, permissions, expires_at, rate_limit_per_minute, daily_send_limit, last_used_at, created_at, updated_at`,
       [
         userId,
         domainId,
@@ -99,6 +117,8 @@ export async function generateApiKey(
         `wka_${keyId}`,
         JSON.stringify(finalPermissions),
         expiresAtIso,
+        rateLimitPerMinute,
+        dailySendLimit,
       ]
     );
 
@@ -111,15 +131,13 @@ export async function generateApiKey(
       key: apiKey,
     };
   } catch (error: unknown) {
-    throw new Error(`Couldn't create API key: ${errorMessage(error)}`);
+    throw new Error(`Couldn\'t create API key: ${errorMessage(error)}`);
   }
 }
 
 export async function verifyApiKey(
   apiKey: string,
 ): Promise<PublicApiKey | null> {
-  // Extract prefix for efficient lookup
-  // Split only on the first two underscores to handle underscores in the secret part
   const firstUnderscore = apiKey.indexOf("_");
   const secondUnderscore = apiKey.indexOf("_", firstUnderscore + 1);
 
@@ -139,7 +157,8 @@ export async function verifyApiKey(
 
   const result = await query<ApiKeyVerificationRow>(
     `SELECT ak.id, ak.user_id, ak.domain_id, ak.key_name, ak.key_hash,
-            ak.key_prefix, ak.permissions, ak.expires_at, ak.last_used_at, ak.created_at, ak.updated_at
+            ak.key_prefix, ak.permissions, ak.expires_at, ak.rate_limit_per_minute, ak.daily_send_limit,
+            ak.last_used_at, ak.created_at, ak.updated_at
      FROM api_keys ak
      JOIN domains d ON d.id = ak.domain_id AND d.user_id = ak.user_id
      WHERE ak.key_prefix = $1`,
@@ -153,10 +172,15 @@ export async function verifyApiKey(
       if (expiresAt && new Date(expiresAt).getTime() <= Date.now()) {
         throw new ExpiredApiKeyError(expiresAt);
       }
-      await query(
-        "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1 AND user_id = $2",
-        [key.id, key.user_id],
-      );
+      const now = Date.now();
+      const last = lastUsedAtCache.get(key.id);
+      if (last === undefined || now - last >= LAST_USED_THROTTLE_MS) {
+        lastUsedAtCache.set(key.id, now);
+        await query(
+          "UPDATE api_keys SET last_used_at = NOW() WHERE id = $1 AND user_id = $2 AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL \'5 minutes\')",
+          [key.id, key.user_id],
+        );
+      }
       return publicApiKey(key);
     }
   }
@@ -169,9 +193,10 @@ export async function getUserApiKeys(
 ): Promise<Array<PublicApiKey & { domains: { domain: string } | null }>> {
   try {
     const result = await query<ApiKeyWithDomainRow>(
-      `SELECT 
+      `SELECT
         ak.id, ak.user_id, ak.domain_id, ak.key_name, ak.key_prefix,
-        ak.permissions, ak.expires_at, ak.last_used_at, ak.created_at, ak.updated_at,
+        ak.permissions, ak.expires_at, ak.rate_limit_per_minute, ak.daily_send_limit,
+        ak.last_used_at, ak.created_at, ak.updated_at,
         d.domain as domain_name
       FROM api_keys ak
       JOIN domains d ON ak.domain_id = d.id AND d.user_id = ak.user_id
@@ -185,7 +210,7 @@ export async function getUserApiKeys(
       domains: row.domain_name ? { domain: row.domain_name } : null,
     }));
   } catch (error: unknown) {
-    throw new Error(`Couldn't fetch API keys: ${errorMessage(error)}`);
+    throw new Error(`Couldn\'t fetch API keys: ${errorMessage(error)}`);
   }
 }
 
@@ -196,7 +221,8 @@ export async function getDomainApiKeys(
   try {
     const result = await query<ApiKeyPublicRow>(
       `SELECT ak.id, ak.user_id, ak.domain_id, ak.key_name, ak.key_prefix,
-              ak.permissions, ak.expires_at, ak.last_used_at, ak.created_at, ak.updated_at
+              ak.permissions, ak.expires_at, ak.rate_limit_per_minute, ak.daily_send_limit,
+              ak.last_used_at, ak.created_at, ak.updated_at
        FROM api_keys ak
        JOIN domains d ON d.id = ak.domain_id AND d.user_id = ak.user_id
        WHERE ak.domain_id = $1 AND ak.user_id = $2
@@ -206,7 +232,7 @@ export async function getDomainApiKeys(
 
     return result.rows.map(publicApiKey);
   } catch (error: unknown) {
-    throw new Error(`Couldn't fetch domain API keys: ${errorMessage(error)}`);
+    throw new Error(`Couldn\'t fetch domain API keys: ${errorMessage(error)}`);
   }
 }
 
@@ -221,10 +247,10 @@ export async function deleteApiKey(
     );
 
     if (result.rowCount === 0) {
-      throw new Error("API key not found or you don't have access.");
+      throw new Error("API key not found or you don\'t have access.");
     }
   } catch (error: unknown) {
-    throw new Error(`Couldn't delete API key: ${errorMessage(error)}`);
+    throw new Error(`Couldn\'t delete API key: ${errorMessage(error)}`);
   }
 }
 
@@ -242,17 +268,48 @@ export async function updateApiKeyPermissions(
     );
 
     if (result.rowCount === 0) {
-      throw new Error("API key not found or you don't have access.");
+      throw new Error("API key not found or you don\'t have access.");
     }
   } catch (error: unknown) {
-    throw new Error(`Couldn't update API key permissions: ${errorMessage(error)}`);
+    throw new Error(`Couldn\'t update API key permissions: ${errorMessage(error)}`);
+  }
+}
+
+export async function updateApiKeyLimits(
+  keyId: string,
+  userId: string,
+  limits: { rateLimitPerMinute?: number | null; dailySendLimit?: number | null }
+): Promise<void> {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  let idx = 1;
+  if ("rateLimitPerMinute" in limits) {
+    sets.push(`rate_limit_per_minute = $${idx++}`);
+    params.push(limits.rateLimitPerMinute ?? null);
+  }
+  if ("dailySendLimit" in limits) {
+    sets.push(`daily_send_limit = $${idx++}`);
+    params.push(limits.dailySendLimit ?? null);
+  }
+  if (sets.length === 0) return;
+  params.push(keyId, userId);
+  try {
+    const result = await query(
+      `UPDATE api_keys SET ${sets.join(", ")} WHERE id = $${idx++} AND user_id = $${idx++}`,
+      params
+    );
+    if (result.rowCount === 0) {
+      throw new Error("API key not found or you don\'t have access.");
+    }
+  } catch (error: unknown) {
+    throw new Error(`Couldn\'t update API key: ${errorMessage(error)}`);
   }
 }
 
 export async function updateApiKey(
   keyId: string,
   userId: string,
-  updates: { permissions?: string[] | null; expiresAt?: string | null }
+  updates: { permissions?: string[] | null; expiresAt?: string | null; rateLimitPerMinute?: number | null; dailySendLimit?: number | null }
 ): Promise<void> {
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -270,13 +327,22 @@ export async function updateApiKey(
 
   if (updates.expiresAt !== undefined) {
     let iso: string | null = null;
-    if (updates.expiresAt !== null) {
+    if (updates.expiresAt !== null && updates.expiresAt !== "") {
       const d = new Date(updates.expiresAt);
       if (isNaN(d.getTime())) throw new Error("Invalid expiry date.");
       iso = d.toISOString();
     }
     sets.push(`expires_at = $${idx++}`);
     params.push(iso);
+  }
+
+  if ("rateLimitPerMinute" in updates && updates.rateLimitPerMinute !== undefined) {
+    sets.push(`rate_limit_per_minute = $${idx++}`);
+    params.push(updates.rateLimitPerMinute);
+  }
+  if ("dailySendLimit" in updates && updates.dailySendLimit !== undefined) {
+    sets.push(`daily_send_limit = $${idx++}`);
+    params.push(updates.dailySendLimit);
   }
 
   if (!sets.length) throw new Error("No fields to update.");
@@ -286,5 +352,5 @@ export async function updateApiKey(
     `UPDATE api_keys SET ${sets.join(", ")} WHERE id = $${idx++} AND user_id = $${idx}`,
     params
   );
-  if (result.rowCount === 0) throw new Error("API key not found or you don't have access.");
+  if (result.rowCount === 0) throw new Error("API key not found or you don\'t have access.");
 }

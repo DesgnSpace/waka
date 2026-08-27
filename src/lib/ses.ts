@@ -11,6 +11,7 @@ import {
 } from "@aws-sdk/client-ses";
 import crypto from "crypto";
 import { errorHttpStatus, errorMessage, errorName } from "./errors";
+import { htmlToText } from "./html-to-text";
 
 const sesClient = new SESClient({
   region: process.env.AWS_REGION || "us-east-1",
@@ -80,11 +81,13 @@ function randomBoundary(tag: string): string {
 const CONFIG_SET = process.env.SES_CONFIGURATION_SET || "waka-events";
 
 export async function sendEmail(options: SendEmailOptions): Promise<string> {
-  const { from, to, cc, bcc, subject, html, text, replyTo, tags } = options;
+  const { from, to, cc, bcc, subject, html, replyTo, tags } = options;
+  // Caller-supplied text wins; HTML-only sends get a derived text/plain part.
+  const text = options.text || (html ? htmlToText(html) : undefined);
 
   if (options.attachments && options.attachments.length > 0) {
     // Use raw email for attachments
-    return sendRawEmail(options);
+    return sendRawEmail({ ...options, text });
   }
 
   const command = new SendEmailCommand({
@@ -138,10 +141,10 @@ export async function sendRawEmail(options: SendEmailOptions): Promise<string> {
     bcc,
     subject,
     html,
-    text,
     attachments = [],
     replyTo,
   } = options;
+  const text = options.text || (options.html ? htmlToText(options.html) : undefined);
 
   for (const addr of [from, ...to, ...(cc ?? []), ...(replyTo ?? [])]) {
     assertNoCRLF(addr, "address");

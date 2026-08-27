@@ -476,3 +476,17 @@ test("email logs: API key with any filter cannot read other domain", async () =>
   expect(q.params[0]).toEqual([domainA]);
   expect(q.params[1]).toBe(accountA);
 });
+
+test("suppressions are scoped per domain so tenant A cannot see tenant B blocks", async () => {
+  const { findSuppressed } = await import("./suppression");
+  // findSuppressed queries by domain_id only; tenant isolation is enforced
+  // by the handler's getDomainById check before any suppression query.
+  // Here we verify the suppression query itself binds the domain id.
+  executedQueries.length = 0;
+  onFakeQuery(() => ({ rows: [], rowCount: 0 }));
+  await findSuppressed(domainB, ["victim@example.com"]);
+  const call = executedQueries.find((q) => q.sql.includes("FROM suppressions"));
+  expect(call?.params?.[0]).toBe(domainB);
+  expect(call?.sql).toMatch(/domain_id = \$1/);
+
+});

@@ -24,8 +24,8 @@ import {
 import { getDomainApiKeys, generateApiKey, deleteApiKey, updateApiKey } from "@/lib/api-keys";
 import { sendEmail } from "@/lib/ses";
 import { query } from "@/lib/database";
-import { searchEmailLogs } from "@/lib/email-logs";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
+import { reserveDailySend } from "@/lib/quotas";
 
 // --- helpers -----------------------------------------------------------------
 
@@ -116,15 +116,14 @@ const FLASH: Record<string, { kind: "ok" | "err" | "mut"; text: string }> = {
   "test-pending": { kind: "mut", text: "Verify this domain before sending a test email." },
   "test-log-failed": { kind: "mut", text: "The test email was accepted, but its activity could not be recorded. Ask the administrator to check the database." },
   "test-sent": { kind: "ok", text: "Test email accepted. Delivery updates appear in email activity." },
+  "test-rate-limited": { kind: "err", text: "Too many test emails. Wait a moment and try again." },
+  "test-daily-limited": { kind: "err", text: "Daily sending limit reached. Try again tomorrow." },
   "verify-failed": { kind: "err", text: "We could not check DNS right now. Try again in a moment." },
   "domain-required": { kind: "err", text: "Enter a domain such as example.com." },
   "domain-invalid": { kind: "err", text: "That does not look like a domain. Enter a name such as example.com and try again." },
   "domain-owned": { kind: "err", text: "That domain is already connected to another account." },
   "domain-failed": { kind: "err", text: "We could not add that domain. Check the name and try again." },
   "mailfrom-saved": { kind: "ok", text: "Return address saved. Add the new DNS records shown below, then check DNS." },
-  "expiry-saved": { kind: "ok", text: "API key expiry updated." },
-  "expiry-failed": { kind: "err", text: "We could not update the expiry date. Check the date and try again." },
-  "expiry-invalid": { kind: "err", text: "Invalid expiry date. Use YYYY-MM-DD format." },
 };
 
 function flashFrom(req: Req): string {
@@ -602,7 +601,7 @@ type DomainKeys = Awaited<ReturnType<typeof getDomainApiKeys>>;
 
 // Email activity status uses words and color together.
 function statusTag(status: string): string {
-  const known = ["delivered", "sent", "failed", "bounced", "complained", "pending"];
+  const known = ["delivered", "sent", "failed", "bounced", "complained", "pending", "scheduled", "sending"];
   const tone = known.includes(status) ? status : "unknown";
   const labels: Record<string, string> = {
     delivered: "delivered",
@@ -611,6 +610,8 @@ function statusTag(status: string): string {
     bounced: "not delivered",
     complained: "spam complaint",
     pending: "processing",
+    scheduled: "scheduled",
+    sending: "processing",
   };
   const label = labels[status] ?? "unknown";
   return `<span class="status-badge status-${tone}"><span class="status-mark" aria-hidden="true"></span>${esc(label)}</span>`;
@@ -900,54 +901,18 @@ function zoneFile(domain: string, records: DnsRecord[]): string {
 
 // --- logs --------------------------------------------------------------------
 
-type DomainLogFilters = {
-  recipient?: string | null;
-  subject?: string | null;
-  fromDate?: string | null;
-  toDate?: string | null;
-  messageId?: string | null;
-  status?: string | null;
-};
-
-function parseDomainLogFilters(url: URL): DomainLogFilters {
-  const raw = Object.fromEntries(url.searchParams.entries());
-  const trim = (v: string | undefined) => {
-    const t = v?.trim();
-    return t && t.length ? t : null;
-  };
-  return {
-    recipient: trim(raw.recipient),
-    subject: trim(raw.subject),
-    fromDate: trim(raw.from ?? raw.from_date ?? raw.start_date),
-    toDate: trim(raw.to ?? raw.to_date ?? raw.end_date),
-    messageId: trim(raw.message_id ?? raw.messageId),
-    status: trim(raw.status),
-  };
-}
-
-async function getDomainEmailLogs(userId: string, domainId: string, filters: DomainLogFilters) {
-  const { buildEmailLogsWhere } = await import("@/lib/email-logs");
-  const toIsoEnd = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T23:59:59.999Z`).toISOString() : new Date(v).toISOString();
-  const where = buildEmailLogsWhere(
-    { domainId, status: filters.status ?? null, recipient: filters.recipient ?? null, subject: filters.subject ?? null, fromDate: filters.fromDate ? new Date(filters.fromDate).toISOString() : null, toDate: filters.toDate ? toIsoEnd(filters.toDate) : null, messageId: filters.messageId ?? null },
-    3,
-  );
-  const whereSql = where.clauses.length ? `AND ${where.clauses.join(" AND ")}` : "";
-  const baseParams: unknown[] = [[domainId], userId, ...where.params];
-  // Reuse same filtering logic as API; domainIds is single-element array.
+async function getDomainEmailLogs(userId: string, domainId: string) {
   const result = await query(
     `SELECT el.id, el.from_email, el.to_emails, el.subject, el.status, el.created_at,
             COUNT(ev.*) FILTER (WHERE ev.type = 'open')  AS open_count,
             COUNT(ev.*) FILTER (WHERE ev.type = 'click') AS click_count
      FROM email_logs el
-     JOIN domains d ON el.domain_id = d.id AND d.user_id = $2
+     JOIN domains d ON el.domain_id = d.id
      LEFT JOIN email_events ev ON ev.email_log_id = el.id
-     WHERE el.domain_id = ANY($1)
-       AND d.user_id = $2
-       ${whereSql}
+     WHERE d.user_id = $1 AND el.domain_id = $2
      GROUP BY el.id
      ORDER BY el.created_at DESC LIMIT 50`,
-    baseParams,
+    [userId, domainId]
   );
   return result.rows.map((r) => {
     let to: string[] = [];
@@ -967,29 +932,6 @@ async function getDomainEmailLogs(userId: string, domainId: string, filters: Dom
   });
 }
 
-function domainLogsFilterForm(domainId: string, filters: DomainLogFilters): string {
-  const statusOptions = ["", "sent", "delivered", "bounced", "complained", "failed", "pending"];
-  const statusLabels: Record<string, string> = { "": "Any status", sent: "Accepted", delivered: "Delivered", bounced: "Not delivered", complained: "Spam complaint", failed: "Failed", pending: "Processing" };
-  return `<form method="get" action="/ui/domains/${esc(domainId)}/logs" class="block" style="display:grid;gap:12px">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <label><span>Who received it</span><input name="recipient" type="text" placeholder="recipient@example.com" value="${esc(filters.recipient ?? "")}"></label>
-      <label><span>Subject contains</span><input name="subject" type="text" placeholder="Welcome" value="${esc(filters.subject ?? "")}"></label>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <label><span>Sent after</span><input name="from" type="date" value="${esc(filters.fromDate ? filters.fromDate.slice(0,10) : "")}"></label>
-      <label><span>Sent before</span><input name="to" type="date" value="${esc(filters.toDate ? filters.toDate.slice(0,10) : "")}"></label>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <label><span>Message ID</span><input name="message_id" type="text" placeholder="email log or SES id" value="${esc(filters.messageId ?? "")}"></label>
-      <label><span>Delivery status</span><select name="status" style="width:100%;font:inherit;color:var(--fg);background:var(--faint);border:0;border-radius:6px;padding:10px 12px">${statusOptions.map((o) => `<option value="${esc(o)}"${filters.status === o ? " selected" : ""}>${esc(statusLabels[o])}</option>`).join("")}</select></label>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button type="submit" class="btn btn-sm">Search messages</button>
-      <a class="btn btn-quiet btn-sm" href="/ui/domains/${esc(domainId)}/logs">Clear</a>
-    </div>
-  </form>`;
-}
-
 function domainLogsView(logs: Array<{ id: string; from_email: string; to_emails: string[]; subject: string; status: string; created_at: string; open_count?: number; click_count?: number }>): string {
   const count = (n?: number) => (n && n > 0 ? `<span class="t-name">${n}</span>` : `<span class="t-mut">—</span>`);
   const rows = logs
@@ -1007,7 +949,7 @@ function domainLogsView(logs: Array<{ id: string; from_email: string; to_emails:
     .join("");
   return `<table class="logs">
     <thead><tr><th>when</th><th>from</th><th>to</th><th>subject</th><th>status</th><th class="right">opens</th><th class="right">clicks</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="7"><div class="empty"><div class="empty-t">No messages match your search</div><div>Try adjusting the filters or clear them to see all messages.</div></div></td></tr>`}</tbody>
+    <tbody>${rows || `<tr><td colspan="7">${emptyState("No email activity yet", "Create an API key, send a test email from API keys, and activity will appear here.")}</td></tr>`}</tbody>
   </table>`;
 }
 
@@ -1018,16 +960,9 @@ export async function uiDomainLogs(req: Req): Promise<Response> {
   if (!domain) {
     return renderPage(req, "Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user, { status: 404 });
   }
-  const filters = parseDomainLogFilters(new URL(req.url));
-  if (filters.fromDate && isNaN(Date.parse(filters.fromDate))) {
-    return renderPage(req, `${domain.domain} logs`, `${crumbs([{ label: "domains", href: "/dashboard" }, { label: domain.domain, href: `/ui/domains/${esc(domain.id)}` }, { label: "email activity" }])}<h1>Email activity</h1>${alert("err", "Invalid start date. Use YYYY-MM-DD.")}${detailTabs(domain, "logs")}${domainLogsFilterForm(domain.id, filters)}`, user, { status: 400 });
-  }
-  if (filters.toDate && isNaN(Date.parse(filters.toDate))) {
-    return renderPage(req, `${domain.domain} logs`, `${crumbs([{ label: "domains", href: "/dashboard" }, { label: domain.domain, href: `/ui/domains/${esc(domain.id)}` }, { label: "email activity" }])}<h1>Email activity</h1>${alert("err", "Invalid end date. Use YYYY-MM-DD.")}${detailTabs(domain, "logs")}${domainLogsFilterForm(domain.id, filters)}`, user, { status: 400 });
-  }
   let logs: Awaited<ReturnType<typeof getDomainEmailLogs>>;
   try {
-    logs = await getDomainEmailLogs(user.id, domain.id, filters);
+    logs = await getDomainEmailLogs(user.id, domain.id);
   } catch (err) {
     console.error("load email activity failed:", err);
     return problemPage(req, "Email activity", "We could not load email activity. Refresh the page and try again.", user);
@@ -1038,7 +973,6 @@ export async function uiDomainLogs(req: Req): Promise<Response> {
     <p class="section-lede">Domain status: ${verifyStatusTag(domain.status)}</p>
     ${flashFrom(req)}
     ${detailTabs(domain, "logs")}
-    ${domainLogsFilterForm(domain.id, filters)}
     <div class="table-wrap">${domainLogsView(logs)}</div>`;
   return renderPage(req, `${domain.domain} logs`, body, user);
 }
@@ -1062,11 +996,16 @@ function domainKeysView(
 ): string {
   const rows = keys
     .map((k) => {
-      const kAny = k as unknown as { expires_at?: string | null };
+      const kAny = k as unknown as { expires_at?: string | null; rate_limit_per_minute?: number | null; daily_send_limit?: number | null };
+      const limits: string[] = [];
+      if (kAny.rate_limit_per_minute != null) limits.push(`${kAny.rate_limit_per_minute}/min`);
+      if (kAny.daily_send_limit != null) limits.push(`${kAny.daily_send_limit}/day`);
+      const limitLabel = limits.length ? limits.join(" · ") : "—";
       return `<tr>
         <td class="t-name">${esc(k.key_name)}</td>
         <td><code>${esc(k.key_prefix)}…</code></td>
         <td class="t-mut">${esc((k.permissions ?? []).map((permission) => permission === "send" ? "send email" : permission).join(", ") || "—")}</td>
+        <td class="t-mut">${esc(limitLabel)}</td>
         <td class="t-mut">${expiryCell(kAny.expires_at)}</td>
         <td class="t-mut">${formatDate(k.created_at)}</td>
         <td class="right" style="display:flex;gap:6px;justify-content:flex-end;align-items:center">
@@ -1083,6 +1022,8 @@ function domainKeysView(
     domain.status === "verified"
        ? `<form class="toolbar" method="post" action="/ui/domains/${esc(domain.id)}/keys" hx-confirm="Create an API key for this domain?">
            <label><span>Key name</span><input name="keyName" placeholder="local development" required></label>
+           <label><span>Per-minute limit</span><input name="rateLimitPerMinute" type="number" min="1" max="1000000" placeholder="60"></label>
+           <label><span>Daily limit</span><input name="dailySendLimit" type="number" min="1" max="1000000" placeholder="1000"></label>
            <label><span>Expires (optional)</span><input type="date" name="expiresAt" aria-label="Expiry date"></label>
            <button type="submit" class="btn" data-loading-label="creating...">create API key</button>
          </form>`
@@ -1098,16 +1039,25 @@ function domainKeysView(
   return `${banner}${form}
   ${testEmail}
   <div class="table-wrap"><table>
-    <thead><tr><th>name</th><th>key starts with</th><th>access</th><th>expires</th><th>created</th><th class="right">actions</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="6">${emptyState("No API keys yet", domain.status === "verified" ? "Create your first key to send email from this domain." : "Verify this domain before creating an API key.")}</td></tr>`}</tbody>
+    <thead><tr><th>name</th><th>key starts with</th><th>access</th><th>limits</th><th>expires</th><th>created</th><th class="right">actions</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="7">${emptyState("No API keys yet", domain.status === "verified" ? "Create your first key to send email from this domain." : "Verify this domain before creating an API key.")}</td></tr>`}</tbody>
   </table></div>`;
 }
 
-async function sendTestEmail(domain: DomainRow, recipient: string): Promise<Response> {
+async function sendTestEmail(req: Req, domain: DomainRow, recipient: string, user: AuthUser): Promise<Response> {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
     return seeOther(`/ui/domains/${domain.id}?m=test-recipient`);
   }
   if (domain.status !== "verified") return seeOther(`/ui/domains/${domain.id}?m=test-pending`);
+
+  const ipRate = await checkRateLimit(`send-ip:${requestAddress(req)}`, 20, 60_000);
+  const userRate = await checkRateLimit(`send:${user.id}`, 60, 60_000);
+  if (!ipRate.allowed || !userRate.allowed) {
+    return seeOther(`/ui/domains/${domain.id}?m=test-rate-limited`);
+  }
+  if (!(await reserveDailySend(user.id))) {
+    return seeOther(`/ui/domains/${domain.id}?m=test-daily-limited`);
+  }
 
   const from = `test@${domain.domain}`;
   const subject = `Test email from ${domain.domain}`;
@@ -1183,7 +1133,7 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
   const form = await csrfForm(req);
   if (!form) return forbidden();
   if (form.has("to")) {
-    return sendTestEmail(domain, String(form.get("to") ?? "").trim());
+    return sendTestEmail(req as Req, domain, String(form.get("to") ?? "").trim(), user);
   }
   const keyName = String(form.get("keyName") ?? "").trim().slice(0, 255);
   const expiresAtRaw = String(form.get("expiresAt") ?? "").trim();
@@ -1198,12 +1148,34 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
     }
     expiresAt = d.toISOString();
   }
+  const parseLimit = (v: FormDataEntryValue | null): number | null => {
+    if (v == null) return null;
+    const s = String(v).trim();
+    if (!s) return null;
+    const n = Number(s);
+    if (!Number.isInteger(n) || n < 1 || n > 1_000_000) throw new Error("invalid limit");
+    return n;
+  };
+  let rateLimitPerMinute: number | null = null;
+  let dailySendLimit: number | null = null;
+  try {
+    rateLimitPerMinute = parseLimit(form.get("rateLimitPerMinute"));
+    dailySendLimit = parseLimit(form.get("dailySendLimit"));
+  } catch {
+    let keys: DomainKeys;
+    try {
+      keys = await getDomainApiKeys(domain.id, user.id);
+    } catch {
+      keys = [] as unknown as DomainKeys;
+    }
+    return renderPage(req as Req, `${domain.domain} keys`, keysBody(domain, keys, alert("err", "Limits must be positive whole numbers." )), user, { status: 400 });
+  }
   let banner = "";
   try {
     if (domain.status !== "verified") banner = alert("err", "Domain must be verified first.");
     else if (!keyName) banner = alert("err", "Key name is required.");
     else {
-      const created = await generateApiKey(user.id, domain.id, keyName, ["send"], expiresAt);
+      const created = await generateApiKey(user.id, domain.id, keyName, ["send"], { expiresAt, rateLimitPerMinute, dailySendLimit });
       banner = `<div class="block" role="status">
         <div class="block-title">Your API key is ready</div>
         <p class="key-warning">Copy it now. For your security, this full key will not be shown again.</p>
@@ -1222,21 +1194,6 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
     return renderPage(req, `${domain.domain} keys`, keysBody(domain, [], `${banner}${alert("err", message)}`), user, { status: 503 });
   }
   return renderPage(req, `${domain.domain} keys`, keysBody(domain, keys, banner), user);
-}
-
-export async function uiDeleteDomainKey(req: Req): Promise<Response> {
-  const user = gate(req);
-  if (user instanceof Response) return user;
-  if (!(await csrfForm(req))) return forbidden();
-  const domain = await getDomainById(pathUuid(req), user.id);
-  if (!domain) return seeOther("/dashboard");
-  try {
-    await deleteApiKey(pathUuid(req, "keyId"), user.id);
-  } catch (err) {
-    console.error("delete key failed:", err);
-    return seeOther(`/ui/domains/${domain.id}/keys?m=revoke-failed`);
-  }
-  return seeOther(`/ui/domains/${domain.id}/keys?m=revoked`);
 }
 
 export async function uiUpdateDomainKeyExpiry(req: Req): Promise<Response> {
@@ -1260,4 +1217,19 @@ export async function uiUpdateDomainKeyExpiry(req: Req): Promise<Response> {
     return seeOther(`/ui/domains/${domain.id}/keys?m=expiry-failed`);
   }
   return seeOther(`/ui/domains/${domain.id}/keys?m=expiry-saved`);
+}
+
+export async function uiDeleteDomainKey(req: Req): Promise<Response> {
+  const user = gate(req);
+  if (user instanceof Response) return user;
+  if (!(await csrfForm(req))) return forbidden();
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) return seeOther("/dashboard");
+  try {
+    await deleteApiKey(pathUuid(req, "keyId"), user.id);
+  } catch (err) {
+    console.error("delete key failed:", err);
+    return seeOther(`/ui/domains/${domain.id}/keys?m=revoke-failed`);
+  }
+  return seeOther(`/ui/domains/${domain.id}/keys?m=revoked`);
 }

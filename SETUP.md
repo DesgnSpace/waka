@@ -75,6 +75,7 @@ The application reads these variables. `.env.example` contains the same list and
 | `SES_CONFIGURATION_SET` | No | Account-wide SES configuration set attached to sends. Defaults to `waka-events`. | `waka-events` |
 | `SES_SNS_TOPIC_ARN` | No | If set, only signed SNS messages from this topic are accepted by the SES webhook. | `arn:aws:sns:us-east-1:123456789012:waka-events` |
 | `SENTRY_DSN` | No | Enables Sentry error reporting when non-empty. | `https://examplePublicKey@o0.ingest.sentry.io/0` |
+| `LOG_RETENTION_DAYS` | No | Days a sent email keeps its HTML/text body and raw webhook payloads. Each night a job clears those fields from older rows but keeps the rows, so log history stays. `0` disables the job and keeps everything. Defaults to `90`. | `90` |
 
 Do not put real credentials in `.env.example`, source control, a Dockerfile, or a container image. Use `.env` locally and a secret store in production.
 
@@ -137,6 +138,10 @@ curl -X POST http://localhost:3000/api/emails \
 ```
 
 The `from` domain must match the verified domain attached to the API key. In SES sandbox mode, the recipient must also be verified.
+
+To make client retries safe, send an `Idempotency-Key` header with a unique value per message; see [README.md](README.md).
+
+To send later instead of now, add `scheduled_at` to the same request with an ISO 8601 timestamp or a relative offset like `in 30 minutes` (72 hours maximum). Waka stores the message, replies with its `id` immediately, and a background worker delivers it within a minute of that time. Failed deliveries retry up to 5 times before the status becomes `failed`. The daily quota counts the message when it is scheduled, not when it is sent.
 
 ## Troubleshooting
 

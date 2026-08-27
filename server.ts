@@ -6,11 +6,12 @@ Sentry.init({
   environment: process.env.NODE_ENV ?? "development",
 });
 
-import { methods } from "@/server/http";
-import * as h from "@/server/handlers";
-import { snsWebhook } from "@/server/webhooks";
-import * as ui from "@/server/ui";
+import { serveOptions } from "@/server/app";
 import { migrate } from "@/lib/migrate";
+import { purgeExpiredIdempotencyKeys } from "@/lib/idempotency";
+import { purgeExpiredRateLimitBuckets } from "@/lib/rate-limit";
+import { startPruneJob } from "@/lib/prune";
+import { startScheduledSendJob } from "@/lib/scheduled-sends";
 import { bindServer } from "@/lib/rate-limit";
 
 const port = Number(process.env.PORT ?? 3000);
@@ -25,54 +26,49 @@ try {
   throw err;
 }
 
+// Delete expired idempotency keys hourly. Concurrent containers may run this
+// at once; a duplicate delete is harmless. Each pass schedules the next only
+// after it settles, so passes never overlap.
+const IDEMPOTENCY_PURGE_INTERVAL_MS = 60 * 60 * 1000;
+function scheduleIdempotencyPurge(): void {
+  setTimeout(() => {
+    purgeExpiredIdempotencyKeys()
+      .catch((err: unknown) => console.error("Failed to purge expired idempotency keys:", err))
+      .finally(scheduleIdempotencyPurge);
+  }, IDEMPOTENCY_PURGE_INTERVAL_MS);
+}
+scheduleIdempotencyPurge();
+
+const RATE_LIMIT_PURGE_INTERVAL_MS = 60 * 60 * 1000;
+function scheduleRateLimitPurge(): void {
+  setTimeout(() => {
+    purgeExpiredRateLimitBuckets()
+      .catch((err: unknown) => console.error("Failed to purge expired rate-limit buckets:", err))
+      .finally(scheduleRateLimitPurge);
+  }, RATE_LIMIT_PURGE_INTERVAL_MS);
+}
+if (typeof (Bun as unknown as { cron?: unknown }).cron === "function") {
+  (Bun as unknown as { cron: (expr: string, fn: () => Promise<void>) => void }).cron(
+    "0 * * * *",
+    purgeExpiredRateLimitBuckets,
+  );
+} else {
+  scheduleRateLimitPurge();
+}
+
+// Nightly retention job: clears old email bodies and raw webhook payloads.
+startPruneJob();
+
+// Minute-by-minute worker: delivers emails scheduled for a future send time.
+startScheduledSendJob();
+
 // Drop-in replacement for the previous Next.js app: identical /api/* paths,
 // JSON shapes, auth, and env, plus an HTMX dashboard. Business logic is reused
 // unchanged from src/lib.
 const server = Bun.serve({
   port,
   hostname: "0.0.0.0",
-  routes: {
-    // --- JSON API (Resend-compatible + dashboard backend) ---
-    "/api/health": methods({ GET: h.health }),
-    "/api/auth/login": methods({ POST: h.login }),
-    "/api/auth/signup": methods({ POST: h.signup }),
-    "/api/auth/me": methods({ GET: h.me }),
-    "/api/domains": methods({ GET: h.listDomains, POST: h.createDomain }),
-    "/api/domains/:id": methods({ GET: h.getDomain, DELETE: h.removeDomain }),
-    "/api/domains/:id/verify": methods({ POST: h.verifyDomain }),
-    "/api/api-keys": methods({ GET: h.listApiKeys, POST: h.createApiKey }),
-    "/api/api-keys/:id": methods({ PUT: h.updateApiKey, DELETE: h.removeApiKey }),
-    "/api/emails": methods({ POST: h.sendEmailHandler }),
-    "/api/emails/logs": methods({ GET: h.emailLogs }),
-    "/api/usage": methods({ GET: h.usage }),
-    "/api/emails/:id": methods({ GET: h.getEmail }),
-    "/api/webhooks/ses": methods({ POST: snsWebhook }),
-    "/api/tools/email-dns-checker": methods({ POST: h.emailDnsChecker }),
-
-    // --- HTMX dashboard (cookie session, same JWT) ---
-    "/": methods({ GET: ui.home }),
-    "/login": methods({ GET: ui.loginPage, POST: ui.doLogin }),
-    "/logout": methods({ POST: ui.logout }),
-    "/dashboard": methods({ GET: ui.dashboard }),
-    "/ui/domains": methods({ GET: ui.uiDomains, POST: ui.uiAddDomain }),
-    "/ui/domains/:id": methods({ GET: ui.uiDomain }),
-    "/ui/domains/:id/dns.zone": methods({ GET: ui.uiDomainDns }),
-    "/ui/domains/:id/mailfrom": methods({ POST: ui.uiSetMailFrom }),
-    "/ui/domains/:id/verify": methods({ POST: ui.uiVerifyDomain }),
-    "/ui/domains/:id/delete": methods({ POST: ui.uiDeleteDomain }),
-    "/ui/domains/:id/logs": methods({ GET: ui.uiDomainLogs }),
-    "/ui/domains/:id/keys": methods({ GET: ui.uiDomainKeys, POST: ui.uiCreateDomainKey }),
-    "/ui/domains/:id/keys/:keyId/delete": methods({ POST: ui.uiDeleteDomainKey }),
-    "/ui/domains/:id/keys/:keyId/expiry": methods({ POST: ui.uiUpdateDomainKeyExpiry }),
-  },
-  fetch() {
-    return Response.json({ error: "Not found" }, { status: 404 });
-  },
-  error(err: unknown) {
-    console.error("Unhandled server error:", err);
-    Sentry.captureException(err);
-    return Response.json({ error: "Internal server error" }, { status: 500 });
-  },
+  ...serveOptions(),
 });
 
 console.log(`waka listening on http://${server.hostname}:${server.port}`);
