@@ -12,6 +12,7 @@ import { purgeExpiredIdempotencyKeys } from "@/lib/idempotency";
 import { purgeExpiredRateLimitBuckets } from "@/lib/rate-limit";
 import { startPruneJob } from "@/lib/prune";
 import { startScheduledSendJob } from "@/lib/scheduled-sends";
+import { startOutboundWebhookJob } from "@/lib/outbound-webhooks";
 import { bindServer } from "@/lib/rate-limit";
 
 const port = Number(process.env.PORT ?? 3000);
@@ -61,6 +62,9 @@ startPruneJob();
 
 // Minute-by-minute worker: delivers emails scheduled for a future send time.
 startScheduledSendJob();
+
+// Minute-by-minute worker: delivers email events to registered customer endpoints.
+startOutboundWebhookJob();
 
 // Drop-in replacement for the previous Next.js app: identical /api/* paths,
 // JSON shapes, auth, and env, plus an HTMX dashboard. Business logic is reused

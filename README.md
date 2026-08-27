@@ -150,6 +150,85 @@ curl -X POST https://your-host.example/api/emails \
 
 The response returns the same `id` shape as an immediate send, right away. A worker picks up the message within a minute of its send time; until then it has status `scheduled` and appears in `GET /api/emails/logs?status=scheduled`. The daily quota counts a scheduled message when it is submitted. A message whose delivery fails retries up to 5 times, 5 minutes apart, before its status becomes `failed` permanently.
 
+### Outbound webhooks
+
+Register an HTTPS endpoint to receive email events — `delivery`, `bounce`, `complaint`, `open`, `click` — as signed JSON. Waka signs every delivery; you verify the signature to prove it came from your instance.
+
+Manage endpoints with your dashboard JWT (`Authorization: Bearer <jwt>`):
+
+```bash
+# register
+curl -X POST https://your-host.example/api/webhooks \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/waka-events"}'
+# → { data: { webhook: { id, url, enabled }, secret: "<64-hex>" } }
+
+# list
+curl https://your-host.example/api/webhooks -H "Authorization: Bearer <jwt>"
+
+# reveal secret
+curl https://your-host.example/api/webhooks/<id>/secret -H "Authorization: Bearer <jwt>"
+
+# rotate secret
+curl -X POST https://your-host.example/api/webhooks/<id>/rotate -H "Authorization: Bearer <jwt>"
+# → { data: { secret: "<new-64-hex>" } }
+
+# delete
+curl -X DELETE https://your-host.example/api/webhooks/<id> -H "Authorization: Bearer <jwt>"
+```
+
+Each endpoint belongs to the user who created it and only receives events for that user's domains. An endpoint must be an `https://` URL; `http://` is rejected.
+
+**Delivery**: a background worker (`Bun.cron` every minute, guarded by a Postgres advisory lock) POSTs the JSON payload to your URL with a 10s timeout. The SNS handler enqueues the delivery but never waits on your endpoint and never fails because your endpoint failed.
+
+**Payload** (JSON):
+
+```json
+{
+  "type": "delivered",
+  "created_at": "2026-08-26T12:00:00.000Z",
+  "data": {
+    "email_id": "uuid",
+    "ses_message_id": "0100...",
+    "source": "sender@example.com",
+    "destination": ["recipient@example.com"],
+    "timestamp": "2026-08-26T12:00:00.000Z",
+    "bounce": null,
+    "complaint": null,
+    "open": { "ipAddress": "203.0.113.9", "userAgent": "Test/1.0" },
+    "click": { "link": "https://example.com", "ipAddress": "...", "userAgent": "..." }
+  }
+}
+```
+
+**Headers** on every delivery:
+
+- `X-Waka-Timestamp`: Unix seconds as a decimal string, e.g. `1724600000`.
+- `X-Waka-Signature`: `v1=<hex>` where `<hex>` is HMAC-SHA256 hex of the signed string.
+
+**Signed string**: `"<timestamp>.<rawBody>"` where `rawBody` is the exact JSON bytes sent. Example: `1724600000.{"type":"delivered","created_at":"..."}`.
+
+**Verifying** (Node.js):
+
+```js
+import crypto from "node:crypto";
+function verify(secret, timestamp, rawBody, signatureHeader) {
+  const signed = `${timestamp}.${rawBody}`;
+  const expected = "v1=" + crypto.createHmac("sha256", secret).update(signed).digest("hex");
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signatureHeader));
+}
+// fetch handler:
+const ts = req.headers["x-waka-timestamp"];
+const sig = req.headers["x-waka-signature"];
+if (!verify(process.env.WAKA_WEBHOOK_SECRET, ts, rawBody, sig)) throw new Error("invalid signature");
+if (Math.abs(Date.now()/1000 - Number(ts)) > 300) throw new Error("stale timestamp");
+```
+
+Include the timestamp in the comparison so a captured payload cannot be replayed after 5 minutes. Reject if the timestamp differs from `Date.now()` by more than 300 seconds.
+
+**Retries**: exponential backoff with a maximum of 8 attempts. After the first immediate attempt, the delays are 60s, 120s, 240s, 480s, 960s, 1920s, 3840s, then capped at 14400s (4h). After the 8th failure the delivery is marked `dead` and not retried. A repeatedly failing endpoint is disabled after 5 consecutive dead deliveries; it stays disabled until you delete it or create a new one. New events are not retried to a disabled endpoint.
+
 ## Routes
 
 - `GET /api/health`
@@ -168,6 +247,10 @@ The response returns the same `id` shape as an immediate send, right away. A wor
 - `GET /api/emails/logs`
 - `GET /api/emails/:id`
 - `POST /api/webhooks/ses`
+- `GET|POST /api/webhooks`
+- `DELETE /api/webhooks/:id`
+- `GET /api/webhooks/:id/secret`
+- `POST /api/webhooks/:id/rotate`
 - `POST /api/tools/email-dns-checker`
 
 Dashboard routes are `/`, `/login`, `/logout`, `/dashboard`, and the domain and log views under `/ui/`.

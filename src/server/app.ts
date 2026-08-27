@@ -3,6 +3,7 @@ import * as Sentry from "@sentry/bun";
 import { methods, MAX_JSON_BODY_BYTES } from "@/server/http";
 import * as h from "@/server/handlers";
 import { snsWebhook } from "@/server/webhooks";
+import * as wh from "@/server/webhook-endpoint-handlers";
 import * as ui from "@/server/ui";
 
 // One MiB above the largest body the JSON API accepts, so oversized sends are
@@ -30,6 +31,10 @@ export function serveOptions() {
       "/api/emails/logs": methods({ GET: h.emailLogs }),
       "/api/emails/:id": methods({ GET: h.getEmail }),
       "/api/webhooks/ses": methods({ POST: snsWebhook }),
+      "/api/webhooks": methods({ GET: wh.listWebhookEndpointsHandler, POST: wh.createWebhookEndpointHandler }),
+      "/api/webhooks/:id": methods({ DELETE: wh.deleteWebhookEndpointHandler }),
+      "/api/webhooks/:id/secret": methods({ GET: wh.getWebhookSecretHandler }),
+      "/api/webhooks/:id/rotate": methods({ POST: wh.rotateWebhookSecretHandler }),
       "/api/tools/email-dns-checker": methods({ POST: h.emailDnsChecker }),
 
       // --- HTMX dashboard (cookie session, same JWT) ---
