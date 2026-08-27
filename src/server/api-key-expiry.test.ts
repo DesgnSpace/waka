@@ -2,6 +2,9 @@ import { beforeEach, expect, mock, test } from "bun:test";
 import { HttpError } from "./http";
 import type { Req } from "./http";
 import { executedQueries, installFakeDatabase, onFakeQuery } from "@/lib/fake-database";
+import { fakeRateLimitModule } from "@/lib/fake-rate-limit";
+
+process.env.NEXTAUTH_SECRET ??= "test-secret-test-secret-test-secret-32";
 
 const userId = "11111111-1111-4111-8111-111111111111";
 const apiKeyId = "22222222-2222-4222-8222-222222222222";
@@ -81,7 +84,8 @@ mock.module("@/lib/ses", () => ({
   mailFromRecords: () => [],
   setMailFromDomain: unusedSesFn,
 }));
-mock.module("@/lib/quotas", () => ({ reserveDailySend: async () => true }));
+mock.module("@/lib/rate-limit", () => fakeRateLimitModule);
+mock.module("@/lib/quotas", () => ({ reserveDailySend: async () => true, reserveApiKeyDailySend: async () => true }));
 
 const { sendEmailHandler, getEmail, createApiKey, updateApiKey } = await import("./handlers");
 const { generateJWT } = await import("@/lib/auth");
@@ -96,8 +100,11 @@ beforeEach(() => {
   executedQueries.length = 0;
   sendResult = { ok: true, messageId: "ses-id" };
   onFakeQuery((sql, params = []) => {
+    if (sql.includes("FROM suppressions")) return { rows: [], rowCount: 0 };
     if (sql.includes("FROM domains")) return params[0] === domainId && params[1] === userId ? { rows: [domainRow], rowCount: 1 } : { rows: [], rowCount: 0 };
     if (sql.includes("FROM api_keys")) return { rows: [], rowCount: 0 };
+    if (sql.includes("rate_limit_buckets")) return { rows: [], rowCount: 0 };
+    if (sql.includes("idempotency_keys")) return { rows: [], rowCount: 0 };
     return { rows: [{ id: logId }], rowCount: 1 };
   });
 });

@@ -25,7 +25,8 @@ import {
   normalizeDkimSelector,
   normalizeDomain,
 } from "@/lib/email-dns-readiness";
-import { query, type DbRow } from "@/lib/database";
+import { query, transaction, type DbRow } from "@/lib/database";
+import { createHealthChecker } from "@/lib/health-check";
 import { errorCode, errorHttpStatus, errorMessage, errorName } from "@/lib/errors";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 import { reserveApiKeyDailySend, reserveDailySend } from "@/lib/quotas";
@@ -75,13 +76,11 @@ type WebhookEventRow = DbRow<{
 // health
 // ----------------------------------------------------------------------------
 
-export function health(): Response {
-  return json({
-    status: "healthy",
-    timestamp: new Date().toISOString(),
-    service: "Waka",
-    version: "1.0.0",
-  });
+const healthChecks = createHealthChecker((run) => transaction((client) => run(client)));
+
+export async function health(): Promise<Response> {
+  const report = await healthChecks.report();
+  return json(report, report.status === "healthy" ? 200 : 503);
 }
 
 // ----------------------------------------------------------------------------
@@ -1098,6 +1097,11 @@ async function resolveCname(name: string, errors: string[]): Promise<string[]> {
 }
 
 export async function emailDnsChecker(req: Req): Promise<Response> {
+  const ipRate = await checkRateLimit(`dns-check:${requestAddress(req)}`, 10, 60_000);
+  if (!ipRate.allowed) {
+    throw new HttpError(429, { error: "Too many DNS lookups. Try again later." });
+  }
+
   const body = z.object({
     domain: z.string().min(1),
     dkimSelector: z.string().nullable().optional(),
