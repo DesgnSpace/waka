@@ -11,7 +11,7 @@ import {
 import { errorCode } from "@/lib/errors";
 
 const createSchema = z.object({
-  url: z.string().min(1, "URL is required").max(2048).refine(isValidWebhookUrl, "URL must be a valid HTTPS URL."),
+  url: z.string().min(1, "URL is required").max(2048).refine(isValidWebhookUrl, "URL must be a valid public HTTPS URL — private and internal addresses are not allowed."),
 });
 
 export async function listWebhookEndpointsHandler(req: Req): Promise<Response> {
@@ -38,7 +38,7 @@ export async function createWebhookEndpointHandler(req: Req): Promise<Response> 
           },
           secret: result.secret,
         },
-        message: "Webhook endpoint created. Store the secret securely — it is shown only once.",
+        message: "Webhook endpoint created. Store the secret securely — you can retrieve it again via GET /api/webhooks/:id/secret.",
       },
       201,
     );

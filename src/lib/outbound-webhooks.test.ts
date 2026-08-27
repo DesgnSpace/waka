@@ -20,6 +20,8 @@ const {
   planAfterDeliveryFailure,
   isValidWebhookUrl,
   generateWebhookSecret,
+  shouldRetryWebhookStatus,
+  isPrivateIP,
 } = await import("./outbound-webhooks");
 
 test("signed string is timestamp dot raw body", () => {
@@ -224,4 +226,57 @@ test("enqueueOutboundDeliveries scopes to domain owner", async () => {
   await outbound.enqueueOutboundDeliveries("email-log-id", domainId, "delivered", { type: "delivered" });
   const call = executedQueries.find((q) => q.sql.includes("FROM webhook_endpoints"));
   expect(call?.sql).toMatch(/SELECT user_id FROM domains WHERE id = \$1/);
+});
+
+test("shouldRetryWebhookStatus retries 5xx, 429 and 408, dead for other 4xx", () => {
+  for (const code of [500, 501, 502, 503, 504, 429, 408]) {
+    expect(shouldRetryWebhookStatus(code)).toBe(true);
+  }
+  for (const code of [400, 401, 403, 404, 405, 410, 413, 422, 451]) {
+    expect(shouldRetryWebhookStatus(code)).toBe(false);
+  }
+});
+
+test("isValidWebhookUrl rejects loopback, private and link-local addresses", () => {
+  expect(isValidWebhookUrl("https://127.0.0.1/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://127.0.0.5/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://10.0.0.1/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://10.5.6.7/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://192.168.1.1/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://172.16.5.4/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://172.31.255.255/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://169.254.169.254/latest/meta-data/")).toBe(false);
+  expect(isValidWebhookUrl("https://169.254.10.20/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://[::1]/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://[fc00::1]/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://[fe80::1]/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://localhost/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://foo.localhost/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://user:pass@example.com/hook")).toBe(false);
+  expect(isValidWebhookUrl("https://example.com/hook")).toBe(true);
+  expect(isValidWebhookUrl("https://8.8.8.8/hook")).toBe(true);
+  expect(isValidWebhookUrl("https://172.32.0.1/hook")).toBe(true);
+  expect(isValidWebhookUrl("https://192.169.1.1/hook")).toBe(true);
+});
+
+test("isPrivateIP identifies private ranges", () => {
+  expect(isPrivateIP("127.0.0.1")).toBe(true);
+  expect(isPrivateIP("10.0.0.1")).toBe(true);
+  expect(isPrivateIP("192.168.0.5")).toBe(true);
+  expect(isPrivateIP("172.16.0.1")).toBe(true);
+  expect(isPrivateIP("169.254.169.254")).toBe(true);
+  expect(isPrivateIP("::1")).toBe(true);
+  expect(isPrivateIP("8.8.8.8")).toBe(false);
+  expect(isPrivateIP("1.1.1.1")).toBe(false);
+});
+
+test("createWebhookEndpoint rejects private URL", async () => {
+  let err: unknown;
+  try {
+    await outbound.createWebhookEndpoint(userA, "https://192.168.1.1/hook");
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeDefined();
+  expect(String((err as Error).message)).toMatch(/private/i);
 });

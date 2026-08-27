@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import net from "node:net";
+import { lookup } from "node:dns/promises";
 import * as Sentry from "@sentry/bun";
 import { db, query, transaction } from "./database";
 
@@ -56,13 +58,87 @@ export function planAfterDeliveryFailure(attempts: number, now: Date = new Date(
   return { action: "retry", retryAt: nextAttemptAt(attempts, now) };
 }
 
+function isIPv4Private(ip: string): boolean {
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return false;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 0) return true;
+  return false;
+}
+
+function isIPv6Private(ip: string): boolean {
+  const lower = ip.toLowerCase();
+  if (lower === "::1") return true;
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+  if (lower.startsWith("fe80")) return true;
+  if (lower.includes(".")) {
+    const lastColon = lower.lastIndexOf(":");
+    const v4 = lower.slice(lastColon + 1);
+    if (net.isIP(v4) === 4 && isIPv4Private(v4)) return true;
+  }
+  if (lower === "::ffff:127.0.0.1") return true;
+  return false;
+}
+
+export function isPrivateIP(host: string): boolean {
+  const clean = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  const family = net.isIP(clean);
+  if (family === 4) return isIPv4Private(clean);
+  if (family === 6) return isIPv6Private(clean);
+  return false;
+}
+
+function isBlockedHostname(host: string): boolean {
+  const clean = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  const h = clean.toLowerCase();
+  if (h === "localhost" || h.endsWith(".localhost")) return true;
+  return false;
+}
+
 export function isValidWebhookUrl(raw: string): boolean {
   try {
     const url = new URL(raw);
-    return url.protocol === "https:";
+    if (url.protocol !== "https:") return false;
+    if (!url.hostname) return false;
+    if (url.username || url.password) return false;
+    const host = url.hostname;
+    if (isBlockedHostname(host)) return false;
+    if (isPrivateIP(host)) return false;
+    return true;
   } catch {
     return false;
   }
+}
+
+export function shouldRetryWebhookStatus(status: number): boolean {
+  return status >= 500 || status === 429 || status === 408;
+}
+
+async function isDeliveryUrlBlocked(urlStr: string): Promise<boolean> {
+  let hostname: string;
+  try {
+    hostname = new URL(urlStr).hostname;
+  } catch {
+    return true;
+  }
+  if (isBlockedHostname(hostname)) return true;
+  if (isPrivateIP(hostname)) return true;
+  const clean = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  if (net.isIP(clean) !== 0) return false;
+  try {
+    const addresses = await lookup(hostname, { all: true });
+    for (const a of addresses) {
+      if (isPrivateIP(a.address)) return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 export interface WebhookEndpointRow {
@@ -93,7 +169,7 @@ export interface WebhookDeliveryRow {
 
 export async function createWebhookEndpoint(userId: string, url: string): Promise<WebhookEndpointRow & { secret: string }> {
   if (!isValidWebhookUrl(url)) {
-    throw new Error("URL must be a valid HTTPS URL.");
+    throw new Error("URL must be a valid public HTTPS URL — private, loopback, and link-local addresses are not allowed.");
   }
   const secret = generateWebhookSecret();
   const result = await query<WebhookEndpointRow>(
@@ -176,6 +252,9 @@ async function deliverOnce(
   delivery: WebhookDeliveryRow & { url: string; secret: string },
   rawBody: string,
 ): Promise<DeliveryAttemptResult> {
+  if (await isDeliveryUrlBlocked(delivery.url)) {
+    return { status: "dead", statusCode: null, error: "Webhook URL resolves to a private or blocked address" };
+  }
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const signature = computeSignature(delivery.secret, timestamp, rawBody);
   const controller = new AbortController();
@@ -194,7 +273,8 @@ async function deliverOnce(
     });
     if (res.ok) return { status: "success", statusCode: res.status, error: null };
     const text = await res.text().catch(() => "");
-    return { status: res.status >= 500 || res.status === 429 ? "retry" : "retry", statusCode: res.status, error: `HTTP ${res.status}${text ? `: ${text.slice(0, 500)}` : ""}` };
+    const retry = shouldRetryWebhookStatus(res.status);
+    return { status: retry ? "retry" : "dead", statusCode: res.status, error: `HTTP ${res.status}${text ? `: ${text.slice(0, 500)}` : ""}` };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { status: "retry", statusCode: null, error: message.slice(0, 1000) };
@@ -231,10 +311,13 @@ export interface OutboundTickResult {
   dead: number;
 }
 
+const OUTBOUND_CONCURRENCY = 5;
+
 export async function runOutboundWebhookTick(): Promise<OutboundTickResult> {
   const deliveries = await claimPendingDeliveries();
   const counts: OutboundTickResult = { success: 0, retried: 0, dead: 0 };
-  for (const d of deliveries) {
+
+  async function handleDelivery(d: (typeof deliveries)[number]): Promise<void> {
     const rawBody = typeof d.payload === "string" ? d.payload : JSON.stringify(d.payload);
     const result = await deliverOnce(d, rawBody);
     if (result.status === "success") {
@@ -245,7 +328,7 @@ export async function runOutboundWebhookTick(): Promise<OutboundTickResult> {
       await query(`UPDATE webhook_endpoints SET consecutive_failures = 0, updated_at = NOW() WHERE id = $1`, [d.endpoint_id]);
       counts.success += 1;
     } else {
-      const plan = planAfterDeliveryFailure(d.attempts);
+      const plan = result.status === "dead" ? ({ action: "dead" } as const) : planAfterDeliveryFailure(d.attempts);
       if (plan.action === "dead") {
         await query(
           `UPDATE webhook_deliveries SET status = 'dead', last_error = $2, last_status_code = $3, updated_at = NOW() WHERE id = $1`,
@@ -269,12 +352,16 @@ export async function runOutboundWebhookTick(): Promise<OutboundTickResult> {
       }
     }
   }
+
+  for (let i = 0; i < deliveries.length; i += OUTBOUND_CONCURRENCY) {
+    const chunk = deliveries.slice(i, i + OUTBOUND_CONCURRENCY);
+    await Promise.all(chunk.map(handleDelivery));
+  }
   return counts;
 }
 
-export function startOutboundWebhookJob(): Bun.CronJob | null {
-  if (typeof (Bun as unknown as { cron?: unknown }).cron !== "function") return null;
-  return (Bun as unknown as { cron: (expr: string, fn: () => Promise<void>) => Bun.CronJob }).cron(
+export function startOutboundWebhookJob(): Bun.CronJob {
+  return Bun.cron(
     OUTBOUND_CRON_SCHEDULE,
     async () => {
       const client = await db.connect();
