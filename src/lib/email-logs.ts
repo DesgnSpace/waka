@@ -1,5 +1,5 @@
 import { query, type DbRow } from "./database";
-import { parseJsonArray } from "./serialization";
+import { parseJsonArray, parseJsonObject } from "./serialization";
 
 export type EmailLogRow = DbRow<{
   id: string;
@@ -14,6 +14,7 @@ export type EmailLogRow = DbRow<{
   html_content: string | null;
   text_content: string | null;
   attachments: unknown;
+  reply_to?: unknown;
   status: string;
   ses_message_id: string | null;
   error_message: string | null;
@@ -44,10 +45,107 @@ export type EmailLog = Omit<EmailLogRow, "payload" | "to_emails" | "cc_emails" |
   api_keys: { key_name: string } | null;
 };
 
+export type EmailDetailRow = EmailLogRow & { domain_user_id: string };
+
+type EmailWebhookEventRow = DbRow<{
+  id: string;
+  event_type: string;
+  event_data: unknown;
+  created_at: string;
+}>;
+
+export type EmailWebhookEvent = {
+  id: string;
+  event_type: string;
+  event_data: Record<string, unknown>;
+  created_at: string;
+};
+
+type EmailEngagementEventRow = DbRow<{
+  id: string;
+  type: string;
+  link: string | null;
+  user_agent: string | null;
+  created_at: string;
+}>;
+
+export type EmailEngagementEvent = {
+  id: string;
+  type: string;
+  link: string | null;
+  user_agent: string | null;
+  created_at: string;
+};
+
 export type EmailLogsResult = {
   logs: EmailLog[];
   total: number;
 };
+
+export async function getEmailLogDetail(
+  emailId: string,
+  scopedUserId: string,
+  scopedDomainId: string | null = null,
+): Promise<EmailDetailRow | null> {
+  const result = await query<EmailDetailRow>(
+    `SELECT el.*, d.domain as domain_name, d.user_id as domain_user_id, ak.key_name as api_key_name
+     FROM email_logs el
+     JOIN domains d ON el.domain_id = d.id AND d.user_id = $2
+     LEFT JOIN api_keys ak ON el.api_key_id = ak.id
+       AND ak.user_id = d.user_id AND ak.domain_id = el.domain_id
+     WHERE el.id = $1
+        AND ($3::uuid IS NULL OR el.domain_id = $3)`,
+    [emailId, scopedUserId, scopedDomainId],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function getEmailLogWebhookEvents(
+  emailId: string,
+  scopedUserId: string,
+  scopedDomainId: string | null = null,
+): Promise<EmailWebhookEvent[]> {
+  const result = await query<EmailWebhookEventRow>(
+    `SELECT id, event_type, event_data, created_at
+      FROM webhook_events we
+      JOIN email_logs el ON el.id = we.email_log_id
+      JOIN domains d ON d.id = el.domain_id AND d.user_id = $2
+      WHERE we.email_log_id = $1
+        AND ($3::uuid IS NULL OR el.domain_id = $3)
+      ORDER BY we.created_at DESC`,
+    [emailId, scopedUserId, scopedDomainId],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    event_type: row.event_type,
+    event_data: parseJsonObject(row.event_data, "event_data"),
+    created_at: row.created_at,
+  }));
+}
+
+export async function getEmailLogEngagementEvents(
+  emailId: string,
+  scopedUserId: string,
+  scopedDomainId: string | null = null,
+): Promise<EmailEngagementEvent[]> {
+  const result = await query<EmailEngagementEventRow>(
+    `SELECT ee.id, ee.type, ee.link, ee.user_agent, ee.created_at
+      FROM email_events ee
+      JOIN email_logs el ON el.id = ee.email_log_id
+      JOIN domains d ON d.id = el.domain_id AND d.user_id = $2
+      WHERE ee.email_log_id = $1
+        AND ($3::uuid IS NULL OR el.domain_id = $3)
+      ORDER BY ee.created_at DESC`,
+    [emailId, scopedUserId, scopedDomainId],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    type: row.type,
+    link: row.link,
+    user_agent: row.user_agent,
+    created_at: row.created_at,
+  }));
+}
 
 // Kept byte-identical to the expression indexed by idx_email_logs_recipient_trgm
 // so the planner can use that index.

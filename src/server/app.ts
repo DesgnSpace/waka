@@ -52,6 +52,7 @@ export function serveOptions() {
       "/ui/domains/:id/verify": methods({ POST: ui.uiVerifyDomain }),
       "/ui/domains/:id/delete": methods({ POST: ui.uiDeleteDomain }),
       "/ui/domains/:id/logs": methods({ GET: ui.uiDomainLogs }),
+      "/ui/domains/:id/logs/:emailId": methods({ GET: ui.uiDomainEmailLog }),
       "/ui/domains/:id/keys": methods({ GET: ui.uiDomainKeys, POST: ui.uiCreateDomainKey }),
       "/ui/domains/:id/keys/:keyId/delete": methods({ POST: ui.uiDeleteDomainKey }),
       "/ui/domains/:id/keys/:keyId/expiry": methods({ POST: ui.uiUpdateDomainKeyExpiry }),

@@ -36,41 +36,19 @@ import {
   releaseIdempotencyKey,
   reserveIdempotencyKey,
 } from "@/lib/idempotency";
-import { parseJsonArray, parseJsonObject } from "@/lib/serialization";
+import { parseJsonArray } from "@/lib/serialization";
 import { findSuppressed, listSuppressions, removeSuppression } from "@/lib/suppression";
-import { normalizeLogsFilters, searchEmailLogs, toRangeEnd, toRangeStart } from "@/lib/email-logs";
+import {
+  getEmailLogDetail,
+  getEmailLogWebhookEvents,
+  normalizeLogsFilters,
+  searchEmailLogs,
+  toRangeEnd,
+  toRangeStart,
+} from "@/lib/email-logs";
 import { isEmailAddress } from "@/lib/email";
 
 type DomainIdRow = DbRow<{ id: string }>;
-type EmailLogRow = DbRow<{
-  id: string;
-  api_key_id: string | null;
-  domain_id: string;
-  message_id: string | null;
-  from_email: string;
-  to_emails: unknown;
-  cc_emails: unknown;
-  bcc_emails: unknown;
-  subject: string | null;
-  html_content: string | null;
-  text_content: string | null;
-  attachments: unknown;
-  status: string;
-  ses_message_id: string | null;
-  error_message: string | null;
-  webhook_data: unknown;
-  created_at: string;
-  updated_at: string;
-  domain_name: string | null;
-  api_key_name: string | null;
-}>;
-type EmailDetailRow = EmailLogRow & { domain_user_id: string };
-type WebhookEventRow = DbRow<{
-  id: string;
-  event_type: string;
-  event_data: unknown;
-  created_at: string;
-}>;
 
 // ----------------------------------------------------------------------------
 // health
@@ -998,44 +976,24 @@ export async function getEmail(req: Req): Promise<Response> {
     scopedUserId = requireUser(req).id;
   }
 
-  const emailResult = await query<EmailDetailRow>(
-    `SELECT el.*, d.domain as domain_name, d.user_id as domain_user_id, ak.key_name as api_key_name
-     FROM email_logs el
-     JOIN domains d ON el.domain_id = d.id AND d.user_id = $2
-     LEFT JOIN api_keys ak ON el.api_key_id = ak.id
-       AND ak.user_id = d.user_id AND ak.domain_id = el.domain_id
-     WHERE el.id = $1
-        AND ($3::uuid IS NULL OR el.domain_id = $3)`,
-    [pathUuid(req), scopedUserId, scopedDomainId]
-  );
-  if (emailResult.rows.length === 0) return json({ error: "Email not found" }, 404);
+  const emailId = pathUuid(req);
+  const emailData = await getEmailLogDetail(emailId, scopedUserId, scopedDomainId);
+  if (!emailData) return json({ error: "Email not found" }, 404);
 
   // payload carries the raw scheduled request body (attachment bytes included)
   // and is for the sender, never for API readers.
-  const { payload: _payload, ...emailData } = emailResult.rows[0];
-  const webhookResult = await query<WebhookEventRow>(
-    `SELECT id, event_type, event_data, created_at
-      FROM webhook_events we
-      JOIN email_logs el ON el.id = we.email_log_id
-      JOIN domains d ON d.id = el.domain_id AND d.user_id = $2
-      WHERE we.email_log_id = $1
-        AND ($3::uuid IS NULL OR el.domain_id = $3)
-      ORDER BY we.created_at DESC`,
-    [pathUuid(req), scopedUserId, scopedDomainId]
-  );
+  const { payload: _payload, ...emailFields } = emailData;
+  const webhookEvents = await getEmailLogWebhookEvents(emailId, scopedUserId, scopedDomainId);
 
   const email = {
-    ...emailData,
-    to_emails: parseJsonArray(emailData.to_emails, "to_emails"),
-    cc_emails: parseJsonArray(emailData.cc_emails, "cc_emails"),
-    bcc_emails: parseJsonArray(emailData.bcc_emails, "bcc_emails"),
-    attachments: parseJsonArray(emailData.attachments, "attachments"),
-    domains: { domain: emailData.domain_name, user_id: emailData.domain_user_id },
-    api_keys: emailData.api_key_name ? { key_name: emailData.api_key_name } : null,
-    webhook_events: webhookResult.rows.map((row) => ({
-      ...row,
-      event_data: parseJsonObject(row.event_data, "event_data"),
-    })),
+    ...emailFields,
+    to_emails: parseJsonArray(emailFields.to_emails, "to_emails"),
+    cc_emails: parseJsonArray(emailFields.cc_emails, "cc_emails"),
+    bcc_emails: parseJsonArray(emailFields.bcc_emails, "bcc_emails"),
+    attachments: parseJsonArray(emailFields.attachments, "attachments"),
+    domains: { domain: emailFields.domain_name, user_id: emailFields.domain_user_id },
+    api_keys: emailFields.api_key_name ? { key_name: emailFields.api_key_name } : null,
+    webhook_events: webhookEvents,
   };
 
   return json({ success: true, data: { email } });
