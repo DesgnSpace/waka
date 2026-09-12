@@ -73,47 +73,80 @@ function attributeValue(attrs: string, name: string): string | undefined {
   return match[1] ?? match[2] ?? match[3];
 }
 
-// Scans for each opener and locates its closer with indexOf, so a document full
-// of unclosed tags costs one pass rather than one scan per opener. An opener
-// with no closer is left in place for the generic tag stripper to remove; once a
-// closer is missing from a position it is missing from every later one, so that
-// closer is not searched for again.
-function replaceRegions(
-  html: string,
-  open: RegExp,
-  closerFor: (match: RegExpExecArray) => string,
-  render: (match: RegExpExecArray, inner: string) => string,
-): string {
-  const lower = html.toLowerCase();
-  const exhausted = new Set<string>();
-  let out = "";
-  let cursor = 0;
-  open.lastIndex = 0;
+const MAX_TAG_NAME = 24;
 
-  for (let match = open.exec(html); match; match = open.exec(html)) {
-    const contentStart = match.index + match[0].length;
-    const closer = closerFor(match);
-    const end = exhausted.has(closer) ? -1 : lower.indexOf(closer, contentStart);
-    if (end === -1) {
-      exhausted.add(closer);
-      open.lastIndex = contentStart;
-      continue;
-    }
-    out += html.slice(cursor, match.index) + render(match, html.slice(contentStart, end));
-    cursor = end + closer.length;
-    open.lastIndex = cursor;
-  }
-
-  return out + html.slice(cursor);
+// Length-preserving fold, so an index found in the folded copy still addresses
+// the same character in the original. String.toLowerCase does not preserve
+// length ("\u0130" folds to two characters) and tag names and closers are ASCII.
+function asciiLower(html: string): string {
+  return html.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
 function tagName(tag: string): string {
   return /^<\/?([a-zA-Z][a-zA-Z0-9]*)/.exec(tag)?.[1].toLowerCase() ?? "";
 }
 
+function dropComments(html: string): string {
+  let out = "";
+  let cursor = 0;
+
+  for (let start = html.indexOf("<!--"); start !== -1; start = html.indexOf("<!--", cursor)) {
+    const end = html.indexOf("-->", start + 4);
+    if (end === -1) break;
+    out += html.slice(cursor, start);
+    cursor = end + 3;
+  }
+
+  return out + html.slice(cursor);
+}
+
+// Locates openers and closers with indexOf only, so unterminated markup costs
+// one pass: a "<" with no ">" after it means no complete tag remains, and a
+// closer missing from one position is missing from every later one. An opener
+// whose closer is absent is left for the tag walk to render.
+function replaceRegions(
+  html: string,
+  opens: (name: string) => boolean,
+  closerFor: (name: string) => string,
+  render: (attrs: string, inner: string) => string,
+): string {
+  const lower = asciiLower(html);
+  const exhausted = new Set<string>();
+  let out = "";
+  let cursor = 0;
+  let search = 0;
+  let openerEnd = -1;
+
+  for (let start = html.indexOf("<", search); start !== -1; start = html.indexOf("<", search)) {
+    if (openerEnd <= start) openerEnd = html.indexOf(">", start + 1);
+    if (openerEnd === -1) break;
+
+    const name = tagName(html.slice(start, Math.min(openerEnd + 1, start + MAX_TAG_NAME)));
+    const closer = opens(name) ? closerFor(name) : "";
+    const end =
+      closer && !exhausted.has(closer) ? lower.indexOf(closer, openerEnd + 1) : -1;
+    if (end === -1) {
+      if (closer) exhausted.add(closer);
+      search = start + 1;
+      continue;
+    }
+
+    out +=
+      html.slice(cursor, start) +
+      render(html.slice(start + 1 + name.length, openerEnd), html.slice(openerEnd + 1, end));
+    cursor = end + closer.length;
+    search = cursor;
+  }
+
+  return out + html.slice(cursor);
+}
+
+const HIDDEN_TAGS = new Set(["head", "script", "style"]);
+
 function tagText(tag: string): string {
   const name = tagName(tag);
   const closing = tag[1] === "/";
+  if (name === "br") return "\n";
   if (name === "img") return closing ? "" : (attributeValue(tag, "alt")?.trim() ?? "");
   if (name === "td" || name === "th") return " ";
   if (name === "tr") return closing ? "" : "\n";
@@ -148,23 +181,17 @@ function convertAnchor(attrs: string, inner: string): string {
 }
 
 export function htmlToText(html: string): string {
-  const withoutComments = replaceRegions(
-    html,
-    /<!--/g,
-    () => "-->",
-    () => "",
-  );
   const withoutHiddenTags = replaceRegions(
-    withoutComments,
-    /<(head|script|style)\b[^>]*>/gi,
-    (match) => `</${match[1].toLowerCase()}>`,
+    dropComments(html),
+    (name) => HIDDEN_TAGS.has(name),
+    (name) => `</${name}>`,
     () => "",
   );
   const withAnchors = replaceRegions(
-    withoutHiddenTags.replace(/<br\s*\/?\s*>/gi, "\n"),
-    /<a\b([^>]*)>/gi,
+    withoutHiddenTags,
+    (name) => name === "a",
     () => "</a>",
-    (match, inner) => convertAnchor(match[1], inner),
+    convertAnchor,
   );
   return decodeEntities(renderTags(withAnchors, tagText))
     .replace(/[^\S\n]+/g, " ")
