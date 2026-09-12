@@ -290,23 +290,25 @@ th.right,td.right{text-align:right;white-space:nowrap}
 .block{margin-bottom:48px}
 .block-title{font-size:17px;line-height:1.25;font-weight:600;margin-bottom:12px}
 .block code{word-break:break-all;color:var(--fg)}
-.dns-records{display:grid;gap:16px}
-.dns-record{background:var(--surface);border-radius:8px;padding:16px}
-.dns-record-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}
-.dns-record-head strong{font-size:13px;font-weight:500}
-.dns-record-head span{color:var(--ink-2);font-size:13px}
-.copy-field{display:grid;grid-template-columns:72px minmax(0,1fr) auto;gap:10px;align-items:start;padding:7px 0;border-top:1px solid var(--line)}
-.copy-field:first-of-type{border-top:0}
-.copy-label{color:var(--ink-2);font-size:13px;font-weight:500;padding-top:5px}
+.chapter{margin-top:48px}
+.chapter-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:12px}
+.chapter-head h2{margin:0}
+.chapter-head .btn{flex:0 0 auto}
+.dns-records{display:block}
+.dns-records + .note{display:block;margin-top:8px}
+.record{display:block}
+.record + .record{margin-top:24px;padding-top:24px;border-top:1px solid var(--line)}
+.record-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}
+.record-head strong{font-size:13px;font-weight:500}
+.record-head span{color:var(--ink-2);font-size:13px}
+.copy-field{display:grid;grid-template-columns:72px minmax(0,1fr) auto;gap:10px;align-items:start;padding:7px 0}
+.copy-label{color:var(--ink-3);font-size:13px;font-weight:500;padding-top:5px}
 .copy-value{min-width:0;overflow-wrap:anywhere;padding-top:5px}
 .copy-field .cbtn{margin:0}
-.block-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px}
 .note{color:var(--ink-3);font-size:13px}
 .keyout{display:flex;gap:12px;align-items:flex-start;margin-top:12px}
 .keyout code{flex:1;background:var(--surface);border-radius:8px;padding:10px 12px;word-break:break-all}
 .key-warning{color:var(--ink-2);font-size:14px;line-height:1.5}
-.return-note{display:block;margin-bottom:12px}
-.overview-actions{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px}
 
 /* docs */
 .doc-item{display:block;padding:16px 0;border-top:1px solid var(--line)}
@@ -335,6 +337,7 @@ th.right,td.right{text-align:right;white-space:nowrap}
 .state.verified{border-color:var(--ok)}
 .state.failed{border-color:var(--danger)}
 .state-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+.state-heading{display:flex;align-items:center;gap:12px;min-width:0}
 .state-title{font-weight:500}
 .state p{color:var(--ink-2);font-size:14px}
 .state-next{margin-top:8px;color:var(--fg)!important}
@@ -393,18 +396,19 @@ th.right,td.right{text-align:right;white-space:nowrap}
   .toolbar{display:block}
   .toolbar label{margin-bottom:12px}
   .toolbar .btn{width:100%}
-  .block-actions{display:block}
-  .block-actions .btn{margin-top:12px}
+  .chapter{margin-top:32px}
+  .chapter-head{display:block}
+  .chapter-head .btn{margin-top:12px}
   .filter-grid{grid-template-columns:1fr}
   .copy-field{grid-template-columns:64px minmax(0,1fr);gap:8px}
   .copy-field .cbtn{grid-column:2;justify-self:start}
   .keyout{display:block}
   .keyout .cbtn{margin-bottom:8px}
   .keyout code{display:block}
+  .state-head{align-items:flex-start;flex-direction:column}
 }
 @media (max-width:560px){
   .btn,.act,.signout,.btn-text,.cbtn{min-height:44px}
-  .state-head{align-items:flex-start;flex-direction:column}
 }
 `;
 
@@ -801,7 +805,7 @@ function domainsView(domains: DomainRow[], flash = ""): string {
   <p class="lede">Add a domain, publish its DNS records, then send email.</p>
   ${flash}
   <form class="toolbar" method="post" action="/ui/domains" hx-confirm="Add this domain so you can publish its DNS records?">
-    <label><span>Domain to send from</span><input name="domain" type="text" inputmode="url" autocomplete="url" placeholder="example.com" required></label>
+    <label><span>Domain</span><input name="domain" type="text" inputmode="url" autocomplete="url" placeholder="example.com" required></label>
     <button type="submit" class="btn" data-loading-label="Adding…">Add domain</button>
   </form>
   <div class="table-wrap"><table>
@@ -890,8 +894,8 @@ function detailHead(domain: DomainRow): string {
 function dnsTable(records: DnsRecord[]): string {
   const rows = records
     .map(
-      (r) => `<div class="dns-record">
-        <div class="dns-record-head"><strong>${esc(r.type)} record</strong><span>${esc(dnsPurpose(r))}</span></div>
+      (r) => `<div class="record">
+        <div class="record-head"><strong>${esc(r.type)} record</strong><span>${esc(dnsPurpose(r))}</span></div>
         <div class="copy-field"><span class="copy-label">Type</span><code class="copy-value">${esc(r.type)}</code>${copyBtn(r.type, "Copy type")}</div>
         <div class="copy-field"><span class="copy-label">Name</span><code class="copy-value">${esc(r.name)}</code>${copyBtn(r.name, "Copy name")}</div>
         <div class="copy-field"><span class="copy-label">Value</span><code class="copy-value">${esc(r.value)}</code>${copyBtn(r.value, "Copy value")}</div>
@@ -913,23 +917,26 @@ function dnsPurpose(record: DnsRecord): string {
 }
 
 function domainState(domain: DomainRow): string {
+  const checkDns = domain.status !== "verified"
+    ? actionForm(`/ui/domains/${esc(domain.id)}/verify`, "Check DNS", "btn btn-quiet btn-sm", `Check whether DNS is ready for ${domain.domain}.`)
+    : "";
   if (domain.status === "verified") {
     return `<div class="state verified" role="status">
-      <div class="state-head"><span class="state-title">Domain verified</span>${verifyStatusTag(domain.status)}</div>
+      <div class="state-head"><div class="state-heading"><span class="state-title">Domain verified</span>${verifyStatusTag(domain.status)}</div></div>
       <p>This domain is ready to send email.</p>
       <p class="state-next"><strong>Next:</strong> <a class="next-link" href="/ui/domains/${esc(domain.id)}/keys">Create an API key</a>, then use it to send email.</p>
     </div>`;
   }
   if (domain.status === "failed") {
     return `<div class="state failed" role="status">
-      <div class="state-head"><span class="state-title">DNS verification needs attention</span>${verifyStatusTag(domain.status)}</div>
-      <p>At least one DNS record does not match. Compare the records below with your DNS provider, correct any differences, and check again.</p>
+      <div class="state-head"><div class="state-heading"><span class="state-title">DNS verification needs attention</span>${verifyStatusTag(domain.status)}</div>${checkDns}</div>
+      <p>At least one DNS record does not match; compare the records below with your DNS provider and correct any differences.</p>
       <p class="state-next"><strong>Next:</strong> update DNS, wait for it to publish, then click "Check DNS".</p>
     </div>`;
   }
   return `<div class="state pending" role="status">
-    <div class="state-head"><span class="state-title">Waiting for DNS records</span>${verifyStatusTag(domain.status)}</div>
-    <p>Your domain is not ready yet. DNS changes can take a few minutes to appear.</p>
+    <div class="state-head"><div class="state-heading"><span class="state-title">Waiting for DNS</span>${verifyStatusTag(domain.status)}</div>${checkDns}</div>
+    <p>Your domain is not ready yet, and DNS changes can take a few minutes to appear.</p>
       <p class="state-next"><strong>Next:</strong> add every record below at the company that manages your domain, then click "Check DNS".</p>
   </div>`;
 }
@@ -939,32 +946,33 @@ function domainOverview(
   flash = ""
 ): string {
   const dns: DnsRecord[] = Array.isArray(domain.dns_records) ? domain.dns_records : [];
-  const dnsBlock = dns.length
-    ? `<div class="block">
-        <div class="block-title">Add these DNS records</div>
-        <p class="section-lede">Open your domain provider's DNS settings. Add each record exactly as shown. Use the copy buttons to avoid typing mistakes.</p>
-        ${dnsTable(dns)}
-        <div class="block-actions">
-          <span class="note">If your provider adds the domain name automatically, enter only the name before it.</span>
-          <a class="btn btn-quiet btn-sm" href="/ui/domains/${esc(domain.id)}/dns.zone" download="${esc(domain.domain)}.txt" hx-boost="false">Download records</a>
-        </div>
-      </div>`
+  const dnsBody = dns.length
+    ? `<p class="section-lede">Add each record at your DNS provider exactly as shown.</p>
+       ${dnsTable(dns)}
+       <p class="note">If your provider adds the domain name automatically, enter only the part before it.</p>`
     : `<div class="alert err">DNS records are not available yet. <a href="/ui/domains/${esc(domain.id)}">Refresh this page</a> or return to the domains list and open the domain again.</div>`;
+  const dnsChapter = `<section class="chapter">
+      <div class="chapter-head">
+        <h2>DNS records</h2>
+        ${dns.length ? `<a class="btn btn-quiet btn-sm" href="/ui/domains/${esc(domain.id)}/dns.zone" download="${esc(domain.domain)}.txt" hx-boost="false">Download records</a>` : ""}
+      </div>
+      ${dnsBody}
+    </section>`;
   const mailFrom = domain.mail_from_domain ?? "";
-  const mailFromBlock = `<div class="block">
-      <div class="block-title">Optional return address</div>
-      <p class="note return-note">Use a subdomain such as <code>bounce.${esc(domain.domain)}</code> if you want your email's return address to use this domain. Leave it blank to use the default.</p>
+  const mailFromChapter = `<section class="chapter">
+      <h2>Return address</h2>
+      <p class="section-lede">Use a subdomain such as <code>bounce.${esc(domain.domain)}</code> when you want bounces to return to this domain. Leave it blank for the default.</p>
       <form class="toolbar" method="post" action="/ui/domains/${esc(domain.id)}/mailfrom" hx-confirm="Save this return address domain?">
         <label><span>Return address domain</span><input name="mailFrom" type="text" inputmode="url" placeholder="bounce.${esc(domain.domain)}" value="${esc(mailFrom)}"></label>
         <button type="submit" class="btn btn-sm" data-loading-label="Saving…">Save return address</button>
       </form>
-    </div>`;
-  return `${flash}${domainState(domain)}${dnsBlock}${mailFromBlock}
-    <div class="overview-actions">
-      ${domain.status !== "verified" ? actionForm(`/ui/domains/${esc(domain.id)}/verify`, "Check DNS", "btn btn-quiet btn-sm", `Check whether DNS is ready for ${domain.domain}.`) : ""}
+    </section>`;
+  const deleteChapter = `<section class="chapter">
+      <h2>Delete domain</h2>
+      <p class="section-lede">This removes the domain, its API keys and its email activity. It cannot be undone.</p>
       ${actionForm(`/ui/domains/${esc(domain.id)}/delete`, "Delete domain", "btn btn-danger btn-sm", `Delete ${domain.domain}? This also deletes its API keys and email activity.`)}
-    </div>
-    <p class="note">Deleting a domain cannot be undone.</p>`;
+    </section>`;
+  return `${flash}${domainState(domain)}${dnsChapter}${mailFromChapter}${deleteChapter}`;
 }
 
 export async function uiDomain(req: Req): Promise<Response> {
