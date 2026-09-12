@@ -12,12 +12,21 @@ const authClaimsSchema = z.object({
   name: z.string().optional(),
 });
 
+// Shared with the boot-time check in server.ts so the two can't drift apart.
+export function sessionSecretError(secret: string | undefined): string | null {
+  if (!secret || secret.length < 32) {
+    return "NEXTAUTH_SECRET must be set to at least 32 characters";
+  }
+  return null;
+}
+
 function jwtSecret(): string {
   const secret = process.env.NEXTAUTH_SECRET;
-  if (!secret || secret.length < 32) {
-    throw new Error("NEXTAUTH_SECRET must be set to at least 32 characters");
+  const error = sessionSecretError(secret);
+  if (error) {
+    throw new Error(error);
   }
-  return secret;
+  return secret as string;
 }
 
 export interface AuthUser {

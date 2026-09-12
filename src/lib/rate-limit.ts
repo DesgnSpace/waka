@@ -42,7 +42,9 @@ export async function checkRateLimit(
   };
 }
 
-const RATE_LIMIT_PURGE_LOCK_KEY = 724_243;
+// Advisory lock keys in use: 724242 migrate, 724243 prune, 724244 outbound
+// webhooks, 724245 rate-limit purge.
+const RATE_LIMIT_PURGE_LOCK_KEY = 724_245;
 
 export async function purgeExpiredRateLimitBuckets(): Promise<void> {
   const client = await db.connect();

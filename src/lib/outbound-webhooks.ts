@@ -16,6 +16,8 @@ export const DELIVERY_TIMEOUT_MS = 10_000;
 export const DELIVERY_BATCH_SIZE = 25;
 export const MAX_ERROR_BODY_BYTES = 4096;
 export const DISABLE_AFTER_CONSECUTIVE_FAILURES = 5;
+// Advisory lock keys in use: 724242 migrate, 724243 prune, 724244 outbound
+// webhooks, 724245 rate-limit purge.
 export const OUTBOUND_LOCK_KEY = 724_244;
 export const OUTBOUND_CRON_SCHEDULE = "* * * * *";
 

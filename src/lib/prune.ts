@@ -4,6 +4,8 @@ import { db } from "./database";
 
 // App-wide advisory lock so concurrent containers (rolling deploys) never
 // prune simultaneously; the second waits, finds little left, and moves on.
+// Advisory lock keys in use: 724242 migrate, 724243 prune, 724244 outbound
+// webhooks, 724245 rate-limit purge.
 const PRUNE_LOCK_KEY = 724_243;
 
 const BATCH_SIZE = 500;
