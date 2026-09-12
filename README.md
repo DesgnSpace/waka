@@ -152,7 +152,7 @@ The response returns the same `id` shape as an immediate send, right away. A wor
 
 ### Outbound webhooks
 
-Register an HTTPS endpoint to receive email events — `delivery`, `bounce`, `complaint`, `open`, `click` — as signed JSON. Waka signs every delivery; you verify the signature to prove it came from your instance.
+Register an HTTPS endpoint to receive every SES event Waka records for your messages as signed JSON. `type` is the SES `eventType`, lowercased: `send`, `reject`, `delivery`, `bounce`, `complaint`, `deliverydelay`, `subscription`, `rendering failure`, `open`, `click`. Waka signs every delivery; you verify the signature to prove it came from your instance.
 
 Manage endpoints with your dashboard JWT (`Authorization: Bearer <jwt>`):
 
@@ -186,7 +186,7 @@ Each endpoint belongs to the user who created it and only receives events for th
 
 ```json
 {
-  "type": "delivered",
+  "type": "delivery",
   "created_at": "2026-08-26T12:00:00.000Z",
   "data": {
     "email_id": "uuid",
@@ -196,11 +196,14 @@ Each endpoint belongs to the user who created it and only receives events for th
     "timestamp": "2026-08-26T12:00:00.000Z",
     "bounce": null,
     "complaint": null,
-    "open": { "ipAddress": "203.0.113.9", "userAgent": "Test/1.0" },
-    "click": { "link": "https://example.com", "ipAddress": "...", "userAgent": "..." }
+    "deliveryDelay": null,
+    "open": null,
+    "click": null
   }
 }
 ```
+
+`bounce`, `complaint`, `deliveryDelay`, `open` and `click` are the SES event objects passed through unchanged — `bounceType`, `complaintFeedbackType`, `delayType`, `linkTags` and the rest — so the [SES event publishing reference](https://docs.aws.amazon.com/ses/latest/dg/event-publishing-retrieving-sns-contents.html) documents their fields. Only the object for the event's `type` is set; the others are `null`.
 
 **Headers** on every delivery:
 

@@ -13,17 +13,50 @@ const sesMessageSchema = z.object({
     source: z.string(),
     destination: z.array(z.string()),
   }),
+  // Event objects pass through whole: only the fields this handler reads are
+  // typed, and everything else SES reports is kept for the stored event and
+  // for outbound webhooks.
   bounce: z.object({
     bounceType: z.string().optional(),
     bounceSubType: z.string().optional(),
-    bouncedRecipients: z.array(z.object({ emailAddress: z.string(), diagnosticCode: z.string().optional() })),
-  }).optional(),
-  complaint: z.object({ complainedRecipients: z.array(z.object({ emailAddress: z.string() })) }).optional(),
-  open: z.object({ timestamp: z.string().optional(), ipAddress: z.string().optional(), userAgent: z.string().optional() }).optional(),
-  click: z.object({ timestamp: z.string().optional(), ipAddress: z.string().optional(), userAgent: z.string().optional(), link: z.string().optional() }).optional(),
+    bouncedRecipients: z.array(z.object({ emailAddress: z.string(), diagnosticCode: z.string().optional() }).passthrough()),
+  }).passthrough().optional(),
+  complaint: z.object({ complainedRecipients: z.array(z.object({ emailAddress: z.string() }).passthrough()) }).passthrough().optional(),
+  deliveryDelay: z.object({}).passthrough().optional(),
+  open: z.object({ timestamp: z.string().optional(), ipAddress: z.string().optional(), userAgent: z.string().optional() }).passthrough().optional(),
+  click: z.object({ timestamp: z.string().optional(), ipAddress: z.string().optional(), userAgent: z.string().optional(), link: z.string().optional() }).passthrough().optional(),
 }).refine((message) => Boolean(message.eventType || message.notificationType), "Missing SES event type");
 
 type SESMessage = z.infer<typeof sesMessageSchema>;
+
+export function parseSesMessage(raw: unknown): SESMessage {
+  return sesMessageSchema.parse(raw);
+}
+
+// The customer-facing event: the SES event type, lowercased, with the SES
+// event objects forwarded unchanged.
+export function buildOutboundPayload(
+  message: SESMessage,
+  eventType: string,
+  emailLogId: string,
+): Record<string, unknown> {
+  return {
+    type: eventType,
+    created_at: new Date().toISOString(),
+    data: {
+      email_id: emailLogId,
+      ses_message_id: message.mail.messageId,
+      source: message.mail.source,
+      destination: message.mail.destination,
+      timestamp: message.mail.timestamp,
+      bounce: message.bounce ?? null,
+      complaint: message.complaint ?? null,
+      deliveryDelay: message.deliveryDelay ?? null,
+      open: message.open ?? null,
+      click: message.click ?? null,
+    },
+  };
+}
 
 const snsMessageSchema = z.object({
   Type: z.enum(["Notification", "SubscriptionConfirmation", "UnsubscribeConfirmation"]),
@@ -158,22 +191,12 @@ export async function processSESEvent(
   const enqueuedDomainId = (enqueued as { id: string; domain_id: string }).domain_id;
   try {
     const { enqueueOutboundDeliveries } = await import("@/lib/outbound-webhooks");
-    const payload: Record<string, unknown> = {
-      type: eventType,
-      created_at: new Date().toISOString(),
-      data: {
-        email_id: enqueuedId,
-        ses_message_id: message.mail.messageId,
-        source: message.mail.source,
-        destination: message.mail.destination,
-        timestamp: message.mail.timestamp,
-        bounce: message.bounce ?? null,
-        complaint: message.complaint ?? null,
-        open: message.open ?? null,
-        click: message.click ?? null,
-      },
-    };
-    await enqueueOutboundDeliveries(enqueuedId, enqueuedDomainId, eventType, payload);
+    await enqueueOutboundDeliveries(
+      enqueuedId,
+      enqueuedDomainId,
+      eventType,
+      buildOutboundPayload(message, eventType, enqueuedId),
+    );
   } catch (err) {
     console.error("Failed to enqueue outbound webhook deliveries:", err);
   }
@@ -216,7 +239,7 @@ export async function snsWebhook(req: Req): Promise<Response> {
   if (body.Type === "Notification") {
     let message: SESMessage;
     try {
-      message = sesMessageSchema.parse(JSON.parse(body.Message));
+      message = parseSesMessage(JSON.parse(body.Message));
     } catch {
       return json({ error: "Invalid SES event" }, 400);
     }
