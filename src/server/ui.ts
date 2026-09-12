@@ -55,16 +55,28 @@ function seeOther(location: string, extraHeaders: HeadersInit = {}): Response {
   return new Response("", { status: 303, headers });
 }
 
-function renderPage(
+interface SidebarDomain { id: string; domain: string }
+
+async function renderPage(
   req: Req,
   title: string,
   body: string,
   user?: AuthUser | null,
   init: ResponseInit = {},
-): Response {
+  sidebarDomains?: SidebarDomain[],
+): Promise<Response> {
   const existingToken = getCsrfToken(req);
   const csrf = existingToken ?? createCsrfToken();
-  const response = html(layout(title, body, user, csrf), init);
+  let domains = sidebarDomains;
+  if (user && !domains) {
+    try {
+      domains = await getUserDomains(user.id);
+    } catch (err) {
+      console.error("load sidebar domains failed:", err);
+      domains = [];
+    }
+  }
+  const response = html(layout(req.url, title, body, user, csrf, domains ?? []), init);
   if (!existingToken) response.headers.append("Set-Cookie", csrfCookie(csrf));
   return response;
 }
@@ -170,16 +182,28 @@ a:hover{text-decoration:underline}
 :focus-visible{outline:2px solid var(--fg);outline-offset:2px}
 code,.copy-value,.keyout code,.doc pre,.key-prefix{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
 
-.wrap{max-width:920px;margin:0 auto;padding:48px 40px 96px}
-
-/* top bar */
-.top{display:flex;align-items:center;justify-content:space-between;gap:24px;padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:40px}
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
+.side{position:sticky;top:0;height:100vh;overflow-y:auto;padding:24px 16px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:32px}
+.main{padding:40px 48px 96px;max-width:960px;min-width:0}
+.auth{min-height:100vh;padding:48px 40px 96px}
 .brand{font-size:16px;font-weight:600;color:var(--fg)}
 .brand:hover{text-decoration:none}
-.top-nav{display:flex;align-items:center;justify-content:flex-end;gap:16px;color:var(--ink-2);font-size:14px}
-.top-nav a{color:var(--ink-2);font-weight:500}
-.top-nav a:hover{color:var(--fg);text-decoration:none}
-.account{color:var(--ink-2)}
+.menu{display:flex;flex:1;min-height:0}
+.menu summary{display:none}
+.menu-panel{display:flex;flex:1;min-height:0;flex-direction:column;gap:32px}
+.side nav{display:flex;flex-direction:column;gap:24px}
+.side-section{display:grid;gap:4px}
+.side-section-label,.side-link{display:block;padding:8px 12px;border-radius:6px;text-decoration:none}
+.side-section-label{color:var(--ink-3);font-size:13px;font-weight:500}
+.side-section-label:hover,.side-link:hover{background:var(--hover);color:var(--fg);text-decoration:none}
+.side-section-label.active,.side-link.active{background:rgb(0 0 0 / 6%);color:var(--fg);text-decoration:none}
+.side-list{display:grid}
+.side-link{min-width:0;color:var(--ink-2);font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.side-subnav{display:grid;margin-left:12px}
+.side-subnav .side-link,.side-topic{font-size:13px}
+.side-account{display:grid;gap:4px;margin-top:auto}
+.side-account-email{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2);font-size:13px}
+.side-account .signout{justify-self:start}
 
 /* crumbs + headings */
 .crumbs{color:var(--ink-2);font-size:13px;margin-bottom:16px}
@@ -190,12 +214,6 @@ h2{font-size:17px;line-height:1.25;font-weight:600;margin:48px 0 12px}
 h2:first-child{margin-top:0}
 .lede{color:var(--ink-2);font-size:15px;margin-bottom:32px}
 .section-lede{color:var(--ink-2);font-size:14px;margin-bottom:16px}
-
-/* tabs */
-.tabs{display:flex;gap:24px;margin:22px 0 28px;border-bottom:1px solid var(--line);overflow-x:auto}
-.tab{color:var(--ink-2);font-size:14px;font-weight:500;padding:0 0 10px;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
-.tab:hover{color:var(--fg);text-decoration:none}
-.tab.active{color:var(--fg);border-bottom-color:var(--fg);text-decoration:none}
 
 /* forms */
 label{display:block;color:var(--fg);font-size:14px;margin-bottom:16px}
@@ -357,8 +375,21 @@ th.right,td.right{text-align:right;white-space:nowrap}
 .key-expiry-form input{width:150px;padding:6px 8px;font-size:13px}
 
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media (max-width:900px){
+  .app{grid-template-columns:1fr}
+  .side{position:static;height:auto;overflow:visible;border-right:0;border-bottom:1px solid var(--line);padding:16px 20px;flex-direction:row;align-items:center;justify-content:space-between}
+  .menu{display:block;position:relative;flex:0 0 auto;min-height:auto}
+  .menu summary{display:block;order:2;margin-left:auto;padding:8px 12px;border:0;border-radius:6px;background:var(--hover);color:var(--fg);font-size:14px;font-weight:500;line-height:1.4;list-style:none;cursor:pointer}
+  .menu summary:hover{background:var(--faint-2)}
+  .menu summary::-webkit-details-marker{display:none}
+  .menu-panel{display:none;position:absolute;z-index:10;top:calc(100% + 16px);left:calc(100% + 20px - 100vw);right:-20px;min-height:auto;max-height:calc(100vh - 68px);overflow-y:auto;padding:16px 20px 24px;background:var(--bg);border-bottom:1px solid var(--line);gap:24px}
+  .menu[open]>.menu-panel{display:flex}
+  .side nav{gap:20px}
+  .side-account{margin-top:0}
+  .main{padding:24px 20px 64px}
+}
 @media (max-width:700px){
-  .wrap{padding:24px 20px 64px}
+  .auth{padding:24px 20px 64px}
   .toolbar{display:block}
   .toolbar label{margin-bottom:12px}
   .toolbar .btn{width:100%}
@@ -372,9 +403,7 @@ th.right,td.right{text-align:right;white-space:nowrap}
   .keyout code{display:block}
 }
 @media (max-width:560px){
-  .top{display:block}
-  .top-nav{justify-content:flex-start;flex-wrap:wrap;gap:16px;margin-top:16px}
-  .top-nav a,.btn,.act,.signout,.btn-text,.cbtn{min-height:44px}
+  .btn,.act,.signout,.btn-text,.cbtn{min-height:44px}
   .state-head{align-items:flex-start;flex-direction:column}
 }
 `;
@@ -484,23 +513,92 @@ const CSP = [
 
 // --- layout ------------------------------------------------------------------
 
-function topBar(user: AuthUser | null | undefined): string {
-  if (!user) return "";
-  return `<header class="top">
-    <a class="brand" href="/dashboard">Waka</a>
-    <nav class="top-nav" aria-label="Main">
-      <a href="/dashboard">Domains</a>
-      <a href="/ui/docs">Docs</a>
-      <span class="account">${esc(user.email)}</span>
-      <form class="inline-form" method="post" action="/logout" hx-confirm="Sign out?">
-        <button type="submit" class="signout">Sign out</button>
-      </form>
-    </nav>
-  </header>`;
+type DomainSection = "overview" | "logs" | "keys";
+type SidebarState =
+  | { primary: "domains" }
+  | { primary: "domain"; domainId: string; section: DomainSection }
+  | { primary: "docs"; topicSlug?: string };
+
+function sidebarState(url: string): SidebarState {
+  const path = new URL(url).pathname;
+  if (path === "/ui/docs" || path.startsWith("/ui/docs/")) {
+    const topicSlug = path.slice("/ui/docs/".length).split("/")[0] || undefined;
+    return { primary: "docs", topicSlug };
+  }
+  if (path === "/dashboard") return { primary: "domains" };
+
+  const parts = path.split("/").filter(Boolean);
+  if (parts[0] === "ui" && parts[1] === "domains" && parts[2]) {
+    const section = parts[3] === "logs" || parts[3] === "keys" ? parts[3] : "overview";
+    return { primary: "domain", domainId: parts[2], section };
+  }
+  return { primary: "domains" };
 }
 
-function layout(title: string, body: string, user?: AuthUser | null, csrf = ""): string {
-  const pageBody = `${topBar(user)}${body}`;
+function sidebarLink(label: string, href: string, active: boolean, className: string): string {
+  return `<a class="${className}${active ? " active" : ""}" href="${href}"${active ? ' aria-current="page"' : ""}>${esc(label)}</a>`;
+}
+
+function visibleSidebarDomains(domains: SidebarDomain[], activeDomainId?: string): SidebarDomain[] {
+  if (domains.length <= 8) return domains;
+  const visible = domains.slice(0, 8);
+  const active = activeDomainId && domains.find((domain) => domain.id === activeDomainId);
+  if (active && !visible.some((domain) => domain.id === active.id)) visible.push(active);
+  return visible;
+}
+
+function sidebar(user: AuthUser, url: string, domains: SidebarDomain[]): string {
+  const state = sidebarState(url);
+  const activeDomainId = state.primary === "domain" ? state.domainId : undefined;
+  const domainLinks = visibleSidebarDomains(domains, activeDomainId)
+    .map((domain) => {
+      const active = state.primary === "domain" && state.domainId === domain.id;
+      const base = `/ui/domains/${esc(domain.id)}`;
+      const sectionLinks = active
+        ? `<div class="side-subnav">
+            ${sidebarLink("Overview", base, state.section === "overview", "side-link")}
+            ${sidebarLink("Email activity", `${base}/logs`, state.section === "logs", "side-link")}
+            ${sidebarLink("API keys", `${base}/keys`, state.section === "keys", "side-link")}
+          </div>`
+        : "";
+      return `${sidebarLink(domain.domain, base, active, "side-link")}${sectionLinks}`;
+    })
+    .join("");
+  const allDomains = domains.length > 8 ? sidebarLink("All domains", "/dashboard", false, "side-link") : "";
+  const topicLinks = DOC_TOPICS
+    .map((topic) => sidebarLink(topic.title, `/ui/docs/${esc(topic.slug)}`, state.primary === "docs" && state.topicSlug === topic.slug, "side-link side-topic"))
+    .join("");
+
+  return `<aside class="side">
+    <a class="brand" href="/dashboard">Waka</a>
+    <details class="menu">
+      <summary>Menu</summary>
+      <div class="menu-panel">
+        <nav aria-label="Main">
+          <div class="side-section">
+            ${sidebarLink("Domains", "/dashboard", state.primary === "domains", "side-section-label")}
+            <div class="side-list">${domainLinks}${allDomains}</div>
+          </div>
+          <div class="side-section">
+            ${sidebarLink("Docs", "/ui/docs", state.primary === "docs", "side-section-label")}
+            <div class="side-list">${topicLinks}</div>
+          </div>
+        </nav>
+        <div class="side-account">
+          <span class="side-account-email">${esc(user.email)}</span>
+          <form class="inline-form" method="post" action="/logout" hx-confirm="Sign out?">
+            <button type="submit" class="signout">Sign out</button>
+          </form>
+        </div>
+      </div>
+    </details>
+  </aside>`;
+}
+
+function layout(url: string, title: string, body: string, user?: AuthUser | null, csrf = "", domains: SidebarDomain[] = []): string {
+  const pageBody = user
+    ? `<div class="app">${sidebar(user, url, domains)}<main class="main">${body}</main></div>`
+    : `<div class="auth">${body}</div>`;
   const protectedBody = csrf
     ? pageBody.replace(
         /<form\b(?=[^>]*\bmethod\s*=\s*["']post["'])[^>]*>/gi,
@@ -513,7 +611,7 @@ function layout(title: string, body: string, user?: AuthUser | null, csrf = ""):
 <script src="${HTMX_SRC}" integrity="${HTMX_SRI}" crossorigin="anonymous"></script>
 <style>${STYLE}</style>
 <script>${APP_SCRIPT}</script>
-</head><body hx-boost="true"><div class="wrap">${protectedBody}</div>
+</head><body hx-boost="true">${protectedBody}
 <div id="cpop" popover class="cpop" aria-labelledby="cpop-q">
   <p id="cpop-q" class="cpop-q"></p>
   <div class="cpop-actions">
@@ -561,9 +659,16 @@ function emptyState(title: string, desc: string): string {
   return `<div class="empty"><div class="empty-t">${esc(title)}</div><div>${esc(desc)}</div></div>`;
 }
 
-function problemPage(req: Req, title: string, message: string, user: AuthUser, status = 503): Response {
+async function problemPage(
+  req: Req,
+  title: string,
+  message: string,
+  user: AuthUser,
+  status = 503,
+  sidebarDomains?: SidebarDomain[],
+): Promise<Response> {
   const body = `${crumbs([{ label: "Domains", href: "/dashboard" }])}<h1>${esc(title)}</h1>${alert("err", message)}`;
-  return renderPage(req, title, body, user, { status });
+  return renderPage(req, title, body, user, { status }, sidebarDomains);
 }
 
 function crumbs(parts: Array<{ label: string; href?: string }>): string {
@@ -576,7 +681,7 @@ function crumbs(parts: Array<{ label: string; href?: string }>): string {
 
 // --- auth pages --------------------------------------------------------------
 
-export function loginPage(req: Req): Response {
+export async function loginPage(req: Req): Promise<Response> {
   if (sessionUser(req)) return seeOther("/dashboard");
   return renderPage(req, "Sign in", loginView());
 }
@@ -718,9 +823,9 @@ export async function dashboard(req: Req): Promise<Response> {
     domains = await getUserDomains(user.id);
   } catch (err) {
     console.error("load domains failed:", err);
-    return problemPage(req, "Domains", "We could not load your domains. Refresh the page and try again.", user);
+    return problemPage(req, "Domains", "We could not load your domains. Refresh the page and try again.", user, 503, []);
   }
-  return renderPage(req, "Domains", domainsView(domains, flashFrom(req)), user);
+  return renderPage(req, "Domains", domainsView(domains, flashFrom(req)), user, {}, domains);
 }
 
 // /ui/domains GET is an alias kept for old links; list lives at /dashboard.
@@ -777,21 +882,9 @@ export async function uiVerifyDomain(req: Req): Promise<Response> {
 
 // --- domain detail -----------------------------------------------------------
 
-function detailTabs(domain: DomainRow, active: string): string {
-  const tab = (id: string, label: string, href: string) =>
-    `<a class="tab${id === active ? " active" : ""}" href="${href}"${id === active ? ' aria-current="page"' : ""}>${label}</a>`;
-  const base = `/ui/domains/${esc(domain.id)}`;
-  return `<nav class="tabs">
-    ${tab("overview", "Overview", base)}
-    ${tab("logs", "Email activity", `${base}/logs`)}
-    ${tab("keys", "API keys", `${base}/keys`)}
-  </nav>`;
-}
-
-function detailHead(domain: DomainRow, active: string): string {
+function detailHead(domain: DomainRow): string {
   return `${crumbs([{ label: "Domains", href: "/dashboard" }, { label: domain.domain }])}
-    <h1>${esc(domain.domain)}</h1>
-    ${detailTabs(domain, active)}`;
+    <h1>${esc(domain.domain)}</h1>`;
 }
 
 function dnsTable(records: DnsRecord[]): string {
@@ -881,7 +974,7 @@ export async function uiDomain(req: Req): Promise<Response> {
   if (!domain) {
     return renderPage(req, "Not found", `${crumbs([{ label: "Domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user, { status: 404 });
   }
-  const body = detailHead(domain, "overview") +
+  const body = detailHead(domain) +
     domainOverview(domain, flashFrom(req));
   return renderPage(req, domain.domain, body, user);
 }
@@ -900,7 +993,7 @@ export async function uiSetMailFrom(req: Req): Promise<Response> {
     const domain = await getDomainById(domainId, user.id);
     if (!domain) return seeOther("/dashboard");
     const msg = userError(err, "Could not save the return address. Check the domain and try again.");
-    const body = detailHead(domain, "overview") +
+    const body = detailHead(domain) +
       domainOverview(domain, alert("err", msg));
     return renderPage(req, domain.domain, body, user, { status: 400 });
   }
@@ -1065,7 +1158,7 @@ export async function uiDomainLogs(req: Req): Promise<Response> {
     (filters.fromDate && isNaN(Date.parse(filters.fromDate)) && "Enter a start date as YYYY-MM-DD.") ||
     (filters.toDate && isNaN(Date.parse(filters.toDate)) && "Enter an end date as YYYY-MM-DD.");
   if (invalidDate) {
-    const body = `${header}${alert("err", invalidDate)}${detailTabs(domain, "logs")}${domainLogsFilterForm(domain.id, filters)}`;
+    const body = `${header}${alert("err", invalidDate)}${domainLogsFilterForm(domain.id, filters)}`;
     return renderPage(req, `${domain.domain} Email activity`, body, user, { status: 400 });
   }
   let logs: Awaited<ReturnType<typeof getDomainEmailLogs>>;
@@ -1077,7 +1170,6 @@ export async function uiDomainLogs(req: Req): Promise<Response> {
   }
   const body = `${header}
     ${flashFrom(req)}
-    ${detailTabs(domain, "logs")}
     ${domainLogsFilterForm(domain.id, filters)}
     <div class="table-wrap">${domainLogsView(logs, filtered)}</div>`;
   return renderPage(req, `${domain.domain} Email activity`, body, user);
@@ -1208,7 +1300,6 @@ function keysBody(domain: DomainRow, keys: DomainKeys, banner = ""): string {
     <h1>API keys</h1>
     <p class="lede">Keys let your app send email from ${esc(domain.domain)}. Keep them private.</p>
     <p class="section-lede">Domain status: ${verifyStatusTag(domain.status)}</p>
-    ${detailTabs(domain, "keys")}
     ${domainKeysView(domain, keys, banner)}`;
 }
 
@@ -1360,13 +1451,13 @@ function docsIndexView(): string {
     ${items}`;
 }
 
-export function uiDocs(req: Req): Response {
+export async function uiDocs(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
   return renderPage(req, "Docs", docsIndexView(), user);
 }
 
-export function uiDocsTopic(req: Req): Response {
+export async function uiDocsTopic(req: Req): Promise<Response> {
   const user = gate(req);
   if (user instanceof Response) return user;
   const topic = findDocTopic(req.params.topic ?? "");
