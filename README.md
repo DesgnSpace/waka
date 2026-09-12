@@ -150,6 +150,88 @@ curl -X POST https://your-host.example/api/emails \
 
 The response returns the same `id` shape as an immediate send, right away. A worker picks up the message within a minute of its send time; until then it has status `scheduled` and appears in `GET /api/emails/logs?status=scheduled`. The daily quota counts a scheduled message when it is submitted. A message whose delivery fails retries up to 5 times, 5 minutes apart, before its status becomes `failed` permanently.
 
+### Outbound webhooks
+
+Register an HTTPS endpoint to receive every SES event Waka records for your messages as signed JSON. `type` is the SES `eventType`, lowercased: `send`, `reject`, `delivery`, `bounce`, `complaint`, `deliverydelay`, `subscription`, `rendering failure`, `open`, `click`. Waka signs every delivery; you verify the signature to prove it came from your instance.
+
+Manage endpoints with your dashboard JWT (`Authorization: Bearer <jwt>`):
+
+```bash
+# register
+curl -X POST https://your-host.example/api/webhooks \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/waka-events"}'
+# → { data: { webhook: { id, url, enabled }, secret: "<64-hex>" } }
+
+# list
+curl https://your-host.example/api/webhooks -H "Authorization: Bearer <jwt>"
+
+# reveal secret
+curl https://your-host.example/api/webhooks/<id>/secret -H "Authorization: Bearer <jwt>"
+
+# rotate secret
+curl -X POST https://your-host.example/api/webhooks/<id>/rotate -H "Authorization: Bearer <jwt>"
+# → { data: { secret: "<new-64-hex>" } }
+
+# delete
+curl -X DELETE https://your-host.example/api/webhooks/<id> -H "Authorization: Bearer <jwt>"
+```
+
+Each endpoint belongs to the user who created it and only receives events for that user's domains. An endpoint must be a public `https://` URL; `http://`, loopback, link-local, and private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16`, `100.64.0.0/10`, `::1`, `fc00::/7`, `fe80::/10`) are rejected. Literal IP addresses in those ranges and hostnames such as `localhost` are rejected at registration, and the same check is re-applied at delivery time via DNS resolution so a hostname that later points to a private address is still blocked and the delivery is marked `dead` without retry.
+
+**Delivery**: a background worker (`Bun.cron` every minute, guarded by a Postgres advisory lock) POSTs the JSON payload to your URL with a 10s timeout and up to 5 concurrent deliveries per tick. The SNS handler enqueues the delivery but never waits on your endpoint and never fails because your endpoint failed.
+
+**Payload** (JSON):
+
+```json
+{
+  "type": "delivery",
+  "created_at": "2026-08-26T12:00:00.000Z",
+  "data": {
+    "email_id": "uuid",
+    "ses_message_id": "0100...",
+    "source": "sender@example.com",
+    "destination": ["recipient@example.com"],
+    "timestamp": "2026-08-26T12:00:00.000Z",
+    "bounce": null,
+    "complaint": null,
+    "deliveryDelay": null,
+    "open": null,
+    "click": null
+  }
+}
+```
+
+`bounce`, `complaint`, `deliveryDelay`, `open` and `click` are the SES event objects passed through unchanged — `bounceType`, `complaintFeedbackType`, `delayType`, `linkTags` and the rest — so the [SES event publishing reference](https://docs.aws.amazon.com/ses/latest/dg/event-publishing-retrieving-sns-contents.html) documents their fields. Only the object for the event's `type` is set; the others are `null`.
+
+**Headers** on every delivery:
+
+- `X-Waka-Timestamp`: Unix seconds as a decimal string, e.g. `1724600000`.
+- `X-Waka-Signature`: `v1=<hex>` where `<hex>` is HMAC-SHA256 hex of the signed string.
+
+**Signed string**: `"<timestamp>.<rawBody>"` where `rawBody` is the exact JSON bytes sent. Example: `1724600000.{"type":"delivered","created_at":"..."}`.
+
+**Verifying** (Node.js):
+
+```js
+import crypto from "node:crypto";
+function verify(secret, timestamp, rawBody, signatureHeader) {
+  const signed = `${timestamp}.${rawBody}`;
+  const expected = "v1=" + crypto.createHmac("sha256", secret).update(signed).digest("hex");
+  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signatureHeader));
+}
+// fetch handler:
+const ts = req.headers["x-waka-timestamp"];
+const sig = req.headers["x-waka-signature"];
+if (!verify(process.env.WAKA_WEBHOOK_SECRET, ts, rawBody, sig)) throw new Error("invalid signature");
+if (Math.abs(Date.now()/1000 - Number(ts)) > 300) throw new Error("stale timestamp");
+```
+
+Include the timestamp in the comparison so a captured payload cannot be replayed after 5 minutes. Reject if the timestamp differs from `Date.now()` by more than 300 seconds.
+
+**Retries**: exponential backoff with a maximum of 8 attempts. After the first immediate attempt, the delays are 60s, 120s, 240s, 480s, 960s, 1920s, 3840s, then capped at 14400s (4h). Only transient failures are retried: `5xx`, `429 Too Many Requests`, `408 Request Timeout`, and network/timeout errors. Other `4xx` responses (e.g. `400`, `404`, `410`) are permanent and the delivery is marked `dead` immediately without further attempts. A delivery that resolves to a private or blocked address is also `dead` immediately. Redirects are not followed, so a `3xx` response is a permanent failure and the delivery is marked `dead` without further attempts. After the 8th retryable failure the delivery is marked `dead` and not retried. A repeatedly failing endpoint is disabled after 5 consecutive dead deliveries; it stays disabled until you delete it or create a new one. New events are not retried to a disabled endpoint.
+
 ## Routes
 
 - `GET /api/health`
@@ -169,6 +251,10 @@ The response returns the same `id` shape as an immediate send, right away. A wor
 - `GET /api/emails/:id`
 - `GET /api/usage` — per-day counts for `sent`, `delivered`, `bounced`, `complained`, `opened`, `clicked`. Auth: `Bearer wka_` (scoped to its domain) or `Bearer <JWT>` (all owned domains). Query: `from=YYYY-MM-DD` and `to=YYYY-MM-DD`, inclusive. Defaults to the last 30 days when omitted; maximum range is 90 days. Every day in the range is returned, including zeros. Response: `{ success: true, data: { from, to, usage: [{ date, sent, delivered, bounced, complained, opened, clicked }] } }`. Aggregated in a single SQL query using `generate_series` and left-joined log/event counts; uses index `idx_email_logs_domain_id_created_at (domain_id, created_at DESC)` for the log time range.
 - `POST /api/webhooks/ses`
+- `GET|POST /api/webhooks`
+- `DELETE /api/webhooks/:id`
+- `GET /api/webhooks/:id/secret`
+- `POST /api/webhooks/:id/rotate`
 - `POST /api/tools/email-dns-checker`
 
 `GET /api/emails/:id` accepts `Bearer <JWT>` or a `Bearer wka_` key with `send` permission, which is scoped to its own domain.
