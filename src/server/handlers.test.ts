@@ -56,7 +56,6 @@ mock.module("@/lib/api-keys", () => ({
   },
   getUserApiKeys: async () => [],
   deleteApiKey: async () => {},
-  updateApiKeyPermissions: async () => {},
 }));
 const unusedSesFn = async () => {
   throw new Error("not used");

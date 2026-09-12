@@ -72,7 +72,6 @@ mock.module("@/lib/api-keys", () => ({
   getUserApiKeys: async () => [],
   deleteApiKey: async () => {},
   updateApiKey: async () => {},
-  updateApiKeyPermissions: async () => {},
 }));
 
 const accountA = "00000000-0000-4000-a000-00000000000a";

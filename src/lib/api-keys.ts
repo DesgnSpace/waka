@@ -241,58 +241,6 @@ export async function deleteApiKey(
   }
 }
 
-export async function updateApiKeyPermissions(
-  keyId: string,
-  userId: string,
-  permissions: string[]
-): Promise<void> {
-  const sanitized = sanitizePermissions(permissions);
-  if (!sanitized.length) throw new Error("At least one valid permission is required.");
-  try {
-    const result = await query(
-      "UPDATE api_keys SET permissions = $1 WHERE id = $2 AND user_id = $3",
-      [JSON.stringify(sanitized), keyId, userId]
-    );
-
-    if (result.rowCount === 0) {
-      throw new Error("API key not found or you don't have access.");
-    }
-  } catch (error: unknown) {
-    throw new Error(`Couldn't update API key permissions: ${errorMessage(error)}`);
-  }
-}
-
-export async function updateApiKeyLimits(
-  keyId: string,
-  userId: string,
-  limits: { rateLimitPerMinute?: number | null; dailySendLimit?: number | null }
-): Promise<void> {
-  const sets: string[] = [];
-  const params: unknown[] = [];
-  let idx = 1;
-  if ("rateLimitPerMinute" in limits) {
-    sets.push(`rate_limit_per_minute = $${idx++}`);
-    params.push(limits.rateLimitPerMinute ?? null);
-  }
-  if ("dailySendLimit" in limits) {
-    sets.push(`daily_send_limit = $${idx++}`);
-    params.push(limits.dailySendLimit ?? null);
-  }
-  if (sets.length === 0) return;
-  params.push(keyId, userId);
-  try {
-    const result = await query(
-      `UPDATE api_keys SET ${sets.join(", ")} WHERE id = $${idx++} AND user_id = $${idx++}`,
-      params
-    );
-    if (result.rowCount === 0) {
-      throw new Error("API key not found or you don't have access.");
-    }
-  } catch (error: unknown) {
-    throw new Error(`Couldn't update API key: ${errorMessage(error)}`);
-  }
-}
-
 export async function updateApiKey(
   keyId: string,
   userId: string,
