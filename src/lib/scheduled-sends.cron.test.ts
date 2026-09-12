@@ -16,30 +16,67 @@ mock.module("@/lib/ses", () => ({ sendEmail }));
 const { MAX_SEND_ATTEMPTS, startScheduledSendJob } = await import("./scheduled-sends");
 
 const NOW = new Date("2026-08-26T12:00:30.500Z");
-type ClaimRow = { id: string; send_attempts: number; payload: unknown };
+type ClaimRow = { id: string; domain_id: string; send_attempts: number; payload: unknown };
+type DeliveryState = {
+  api_key_id: string | null;
+  expires_at: Date | string | null;
+  domain_status: string | null;
+};
+
+const VALID_STATE: DeliveryState = {
+  api_key_id: "key-1111",
+  expires_at: null,
+  domain_status: "verified",
+};
 
 const okRow: ClaimRow = {
   id: "aaaaaaaa-1111-4111-8111-111111111111",
+  domain_id: "domain-1111",
   send_attempts: 1,
   payload: { from: "sender@example.com", to: ["dest@example.com"], subject: "Hi", text: "body" },
 };
 const doomedRow: ClaimRow = {
   id: "bbbbbbbb-2222-4222-8222-222222222222",
+  domain_id: "domain-1111",
   send_attempts: MAX_SEND_ATTEMPTS,
   payload: { from: "doomed@example.com", to: ["gone@example.com"], subject: "Hi", text: "body" },
 };
 const retryRow: ClaimRow = {
   id: "cccccccc-3333-4333-8333-333333333333",
+  domain_id: "domain-1111",
   send_attempts: MAX_SEND_ATTEMPTS - 1,
   payload: { from: "doomed@example.com", to: ["gone@example.com"], subject: "Hi", text: "body" },
 };
+const validationRow: ClaimRow = {
+  id: "dddddddd-4444-4444-8444-444444444444",
+  domain_id: "domain-1111",
+  send_attempts: 1,
+  payload: {
+    from: "sender@example.com",
+    to: ["to@example.com"],
+    cc: ["cc@example.com"],
+    bcc: ["bcc@example.com"],
+    subject: "Hi",
+    text: "body",
+  },
+};
 
-function claim(claimed: ClaimRow[]): void {
-  onFakeQuery((sql) =>
-    sql.includes("WITH due AS")
-      ? { rows: claimed, rowCount: claimed.length }
-      : { rows: [], rowCount: 1 },
-  );
+function claim(
+  claimed: ClaimRow[],
+  options: { state?: DeliveryState; suppressed?: string[] } = {},
+): void {
+  const state = options.state ?? VALID_STATE;
+  onFakeQuery((sql) => {
+    if (sql.includes("WITH due AS")) return { rows: claimed, rowCount: claimed.length };
+    if (sql.includes("FROM email_logs el") && sql.includes("LEFT JOIN api_keys")) {
+      return { rows: [state], rowCount: 1 };
+    }
+    if (sql.includes("FROM suppressions")) {
+      const rows = (options.suppressed ?? []).map((email) => ({ email }));
+      return { rows, rowCount: rows.length };
+    }
+    return { rows: [], rowCount: 1 };
+  });
 }
 
 const claims = () => executedQueries.filter((q) => q.sql.includes("WITH due AS"));
@@ -111,6 +148,82 @@ test("a failed attempt below the cap reschedules instead of abandoning", async (
   const firedAt = NOW.getTime() - (NOW.getTime() % 60_000) + 60_000;
   expect((retryUpdate.params[1] as Date).getTime()).toBe(firedAt + 300_000);
   expect(statusUpdates("failed").length).toBe(0);
+
+  job.stop();
+});
+
+test("a recipient suppressed after scheduling fails without sending", async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(NOW);
+  const job = startScheduledSendJob();
+
+  claim([validationRow], { suppressed: ["cc@example.com"] });
+  jest.advanceTimersByTime(60_000);
+  await drainMicrotasks();
+
+  expect(sendEmail.mock.calls.length).toBe(0);
+  const failedUpdate = statusUpdates("failed")[0];
+  expect(failedUpdate.params[0]).toBe(validationRow.id);
+  expect(failedUpdate.params[1]).toBe(
+    "Recipient cc@example.com previously bounced or was marked as spam for this domain and won't receive mail. Remove it from the suppression list to send again.",
+  );
+  const suppressionQuery = executedQueries.find((q) => q.sql.includes("FROM suppressions"));
+  expect(suppressionQuery?.params[1]).toEqual([
+    "to@example.com",
+    "cc@example.com",
+    "bcc@example.com",
+  ]);
+
+  job.stop();
+});
+
+test("a revoked API key fails without sending or retrying", async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(NOW);
+  const job = startScheduledSendJob();
+
+  claim([validationRow], { state: { ...VALID_STATE, api_key_id: null } });
+  jest.advanceTimersByTime(60_000);
+  await drainMicrotasks();
+
+  expect(sendEmail.mock.calls.length).toBe(0);
+  const failedUpdate = statusUpdates("failed")[0];
+  expect(failedUpdate.params).toEqual([validationRow.id, "API key revoked"]);
+  expect(statusUpdates("scheduled").length).toBe(0);
+
+  job.stop();
+});
+
+test("an expired API key fails without sending or retrying", async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(NOW);
+  const job = startScheduledSendJob();
+
+  claim([validationRow], { state: { ...VALID_STATE, expires_at: new Date(NOW.getTime() - 1) } });
+  jest.advanceTimersByTime(60_000);
+  await drainMicrotasks();
+
+  expect(sendEmail.mock.calls.length).toBe(0);
+  const failedUpdate = statusUpdates("failed")[0];
+  expect(failedUpdate.params).toEqual([validationRow.id, "API key expired"]);
+  expect(statusUpdates("scheduled").length).toBe(0);
+
+  job.stop();
+});
+
+test("an unverified domain fails without sending or retrying", async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(NOW);
+  const job = startScheduledSendJob();
+
+  claim([validationRow], { state: { ...VALID_STATE, domain_status: "pending" } });
+  jest.advanceTimersByTime(60_000);
+  await drainMicrotasks();
+
+  expect(sendEmail.mock.calls.length).toBe(0);
+  const failedUpdate = statusUpdates("failed")[0];
+  expect(failedUpdate.params).toEqual([validationRow.id, "Domain no longer verified"]);
+  expect(statusUpdates("scheduled").length).toBe(0);
 
   job.stop();
 });
