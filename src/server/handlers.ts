@@ -18,13 +18,7 @@ import {
   deleteDomain,
   checkDomainVerification,
 } from "@/lib/domains";
-import {
-  generateApiKey,
-  getUserApiKeys,
-  deleteApiKey,
-  updateApiKeyLimits,
-  updateApiKeyPermissions,
-} from "@/lib/api-keys";
+import { generateApiKey, getUserApiKeys, deleteApiKey, updateApiKey as updateApiKeyRecord } from "@/lib/api-keys";
 import { sendEmail } from "@/lib/ses";
 import {
   analyzeEmailDnsRecords,
@@ -232,21 +226,34 @@ export async function removeSuppressionHandler(req: Req): Promise<Response> {
 // ----------------------------------------------------------------------------
 
 const limitField = z.number().int().min(1).max(1_000_000).nullable().optional();
+const expiresAtField = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z
+    .string()
+    .refine((value) => !isNaN(Date.parse(value)), { message: "Invalid expiry date. Use ISO 8601 format." })
+    .nullable()
+    .optional(),
+);
+
 const createApiKeySchema = z.object({
   domainId: z.string().uuid("Invalid domain ID"),
   keyName: z.string().trim().min(1, "Key name is required").max(255),
-  permissions: z.array(z.enum(["send", "receive", "webhooks"])).max(3).optional().default(["send"]),
+  permissions: z.array(z.enum(["send"])).max(1).optional().default(["send"]),
+  expiresAt: expiresAtField,
   rateLimitPerMinute: limitField,
   dailySendLimit: limitField,
 });
 
-const updateApiKeySchema = z.object({
-  permissions: z.array(z.enum(["send", "receive", "webhooks"])).min(1).max(3).optional(),
-  rateLimitPerMinute: limitField,
-  dailySendLimit: limitField,
-}).refine((v) => v.permissions !== undefined || v.rateLimitPerMinute !== undefined || v.dailySendLimit !== undefined, {
-  message: "Provide at least one field to update.",
-});
+const updateApiKeySchema = z
+  .object({
+    permissions: z.array(z.enum(["send"])).min(1).max(1).optional(),
+    expiresAt: expiresAtField,
+    rateLimitPerMinute: limitField,
+    dailySendLimit: limitField,
+  })
+  .refine((v) => v.permissions !== undefined || v.expiresAt !== undefined || v.rateLimitPerMinute !== undefined || v.dailySendLimit !== undefined, {
+    message: "Provide at least one field to update.",
+  });
 
 export async function listApiKeys(req: Req): Promise<Response> {
   const user = requireUser(req);
@@ -256,7 +263,7 @@ export async function listApiKeys(req: Req): Promise<Response> {
 
 export async function createApiKey(req: Req): Promise<Response> {
   const user = requireUser(req);
-  const { domainId, keyName, permissions, rateLimitPerMinute, dailySendLimit } =
+  const { domainId, keyName, permissions, expiresAt, rateLimitPerMinute, dailySendLimit } =
     createApiKeySchema.parse(await jsonBody(req));
 
   const domain = await getDomainById(domainId, user.id);
@@ -268,6 +275,7 @@ export async function createApiKey(req: Req): Promise<Response> {
   }
 
   const apiKey = await generateApiKey(user.id, domainId, keyName, permissions, {
+    expiresAt: expiresAt ?? null,
     rateLimitPerMinute: rateLimitPerMinute ?? null,
     dailySendLimit: dailySendLimit ?? null,
   });
@@ -280,17 +288,14 @@ export async function createApiKey(req: Req): Promise<Response> {
 
 export async function updateApiKey(req: Req): Promise<Response> {
   const user = requireUser(req);
-  const { permissions, rateLimitPerMinute, dailySendLimit } =
+  const { permissions, expiresAt, rateLimitPerMinute, dailySendLimit } =
     updateApiKeySchema.parse(await jsonBody(req));
-  if (permissions !== undefined) {
-    await updateApiKeyPermissions(pathUuid(req), user.id, permissions);
-  }
-  if (rateLimitPerMinute !== undefined || dailySendLimit !== undefined) {
-    await updateApiKeyLimits(pathUuid(req), user.id, {
-      ...(rateLimitPerMinute !== undefined ? { rateLimitPerMinute } : {}),
-      ...(dailySendLimit !== undefined ? { dailySendLimit } : {}),
-    });
-  }
+  await updateApiKeyRecord(pathUuid(req), user.id, {
+    ...(permissions !== undefined ? { permissions } : {}),
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
+    ...(rateLimitPerMinute !== undefined ? { rateLimitPerMinute } : {}),
+    ...(dailySendLimit !== undefined ? { dailySendLimit } : {}),
+  });
   return json({ success: true, message: "API key updated." });
 }
 
@@ -837,28 +842,192 @@ export async function emailLogs(req: Req): Promise<Response> {
   });
 }
 
+const MAX_USAGE_DAYS = 90;
+const DEFAULT_USAGE_DAYS = 30;
+
+function parseUsageDate(value: string): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new HttpError(400, { error: `Invalid date: ${value}. Use YYYY-MM-DD.` });
+  const d = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(d.getTime())) throw new HttpError(400, { error: `Invalid date: ${value}.` });
+  return d;
+}
+
+function toDateOnly(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+type UsageRow = DbRow<{
+  day: string;
+  sent: string;
+  delivered: string;
+  bounced: string;
+  complained: string;
+  opened: string;
+  clicked: string;
+}>;
+
+const usageQuerySchema = z.object({
+  from: z.string().optional(),
+  to: z.string().optional(),
+});
+
+function shiftDays(date: Date, days: number): Date {
+  const shifted = new Date(date);
+  shifted.setUTCDate(shifted.getUTCDate() + days);
+  return shifted;
+}
+
+export async function usage(req: Req): Promise<Response> {
+  const auth = req.headers.get("authorization");
+  if (!auth?.startsWith("Bearer ")) {
+    return json({ error: "Missing authorization header" }, 401);
+  }
+
+  const { from, to } = usageQuerySchema.parse(Object.fromEntries(new URL(req.url).searchParams));
+  const today = toDateOnly(new Date());
+
+  let fromStr: string;
+  let toStr: string;
+  if (from && to) {
+    fromStr = from;
+    toStr = to;
+  } else if (from) {
+    const capped = toDateOnly(shiftDays(parseUsageDate(from), DEFAULT_USAGE_DAYS - 1));
+    fromStr = from;
+    toStr = capped > today ? today : capped;
+  } else if (to) {
+    toStr = to;
+    fromStr = toDateOnly(shiftDays(parseUsageDate(to), -(DEFAULT_USAGE_DAYS - 1)));
+  } else {
+    toStr = today;
+    fromStr = toDateOnly(shiftDays(parseUsageDate(today), -(DEFAULT_USAGE_DAYS - 1)));
+  }
+
+  const fromDate = parseUsageDate(fromStr);
+  const toDate = parseUsageDate(toStr);
+  if (fromDate.getTime() > toDate.getTime()) {
+    throw new HttpError(400, { error: "`from` must be on or before `to`." });
+  }
+  const daysInclusive = Math.floor((toDate.getTime() - fromDate.getTime()) / 86400000) + 1;
+  if (daysInclusive > MAX_USAGE_DAYS) {
+    throw new HttpError(400, { error: `Date range too large. Maximum ${MAX_USAGE_DAYS} days.` });
+  }
+
+  let domainIds: string[] = [];
+  let scopedUserId: string;
+  if (auth.startsWith("Bearer wka_")) {
+    const apiKey = await requireApiKey(req);
+    domainIds = [apiKey.domain_id];
+    scopedUserId = apiKey.user_id;
+  } else {
+    const user = requireUser(req);
+    scopedUserId = user.id;
+    const result = await query<DomainIdRow>("SELECT id FROM domains WHERE user_id = $1", [user.id]);
+    domainIds = result.rows.map((d) => d.id);
+  }
+
+  const fromParam = toDateOnly(fromDate);
+  const toParam = toDateOnly(toDate);
+
+  const result = await query<UsageRow>(
+    `WITH days AS (
+       SELECT generate_series($2::date, $3::date, '1 day'::interval)::date AS day
+     ),
+     log_counts AS (
+       SELECT date_trunc('day', el.created_at)::date AS day,
+         COUNT(*) FILTER (WHERE el.status = 'sent') AS sent,
+         COUNT(*) FILTER (WHERE el.status = 'delivered') AS delivered,
+         COUNT(*) FILTER (WHERE el.status = 'bounced') AS bounced,
+         COUNT(*) FILTER (WHERE el.status = 'complained') AS complained
+       FROM email_logs el
+       WHERE el.domain_id = ANY($1)
+         AND el.created_at >= $2::date::timestamptz
+         AND el.created_at < ($3::date + INTERVAL '1 day')::timestamptz
+         AND EXISTS (SELECT 1 FROM domains d WHERE d.id = el.domain_id AND d.user_id = $4)
+       GROUP BY 1
+     ),
+     event_counts AS (
+       SELECT date_trunc('day', ee.created_at)::date AS day,
+         COUNT(*) FILTER (WHERE ee.type = 'open') AS opened,
+         COUNT(*) FILTER (WHERE ee.type = 'click') AS clicked
+       FROM email_events ee
+       JOIN email_logs el ON el.id = ee.email_log_id
+       WHERE el.domain_id = ANY($1)
+         AND ee.created_at >= $2::date::timestamptz
+         AND ee.created_at < ($3::date + INTERVAL '1 day')::timestamptz
+         AND EXISTS (SELECT 1 FROM domains d WHERE d.id = el.domain_id AND d.user_id = $4)
+       GROUP BY 1
+     )
+     SELECT
+       days.day::text AS day,
+       COALESCE(l.sent, 0)::text AS sent,
+       COALESCE(l.delivered, 0)::text AS delivered,
+       COALESCE(l.bounced, 0)::text AS bounced,
+       COALESCE(l.complained, 0)::text AS complained,
+       COALESCE(e.opened, 0)::text AS opened,
+       COALESCE(e.clicked, 0)::text AS clicked
+     FROM days
+     LEFT JOIN log_counts l ON l.day = days.day
+     LEFT JOIN event_counts e ON e.day = days.day
+     ORDER BY days.day`,
+    [domainIds, fromParam, toParam, scopedUserId]
+  );
+
+  const perDay = result.rows.map((row) => ({
+    date: row.day.slice(0, 10),
+    sent: Number(row.sent),
+    delivered: Number(row.delivered),
+    bounced: Number(row.bounced),
+    complained: Number(row.complained),
+    opened: Number(row.opened),
+    clicked: Number(row.clicked),
+  }));
+
+  return json({ success: true, data: { from: fromParam, to: toParam, usage: perDay } });
+}
+
 export async function getEmail(req: Req): Promise<Response> {
-  const user = requireUser(req);
+  let scopedUserId: string;
+  let scopedDomainId: string | null = null;
+  const auth = req.headers.get("authorization");
+  if (auth?.startsWith("Bearer wka_")) {
+    const apiKey = await requireApiKey(req);
+    if (!apiKey.permissions.includes("send")) {
+      return json(
+        { error: "This API key can't retrieve emails. Create a key with send permission." },
+        403,
+      );
+    }
+    scopedUserId = apiKey.user_id;
+    scopedDomainId = apiKey.domain_id;
+  } else {
+    scopedUserId = requireUser(req).id;
+  }
+
   const emailResult = await query<EmailDetailRow>(
     `SELECT el.*, d.domain as domain_name, d.user_id as domain_user_id, ak.key_name as api_key_name
      FROM email_logs el
      JOIN domains d ON el.domain_id = d.id AND d.user_id = $2
      LEFT JOIN api_keys ak ON el.api_key_id = ak.id
        AND ak.user_id = d.user_id AND ak.domain_id = el.domain_id
-     WHERE el.id = $1`,
-    [pathUuid(req), user.id]
+     WHERE el.id = $1
+        AND ($3::uuid IS NULL OR el.domain_id = $3)`,
+    [pathUuid(req), scopedUserId, scopedDomainId]
   );
   if (emailResult.rows.length === 0) return json({ error: "Email not found" }, 404);
 
-  const emailData = emailResult.rows[0];
+  // payload carries the raw scheduled request body (attachment bytes included)
+  // and is for the sender, never for API readers.
+  const { payload: _payload, ...emailData } = emailResult.rows[0];
   const webhookResult = await query<WebhookEventRow>(
     `SELECT id, event_type, event_data, created_at
       FROM webhook_events we
       JOIN email_logs el ON el.id = we.email_log_id
       JOIN domains d ON d.id = el.domain_id AND d.user_id = $2
       WHERE we.email_log_id = $1
+        AND ($3::uuid IS NULL OR el.domain_id = $3)
       ORDER BY we.created_at DESC`,
-    [pathUuid(req), user.id]
+    [pathUuid(req), scopedUserId, scopedDomainId]
   );
 
   const email = {
