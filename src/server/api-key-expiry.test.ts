@@ -83,7 +83,7 @@ mock.module("@/lib/ses", () => ({
 mock.module("@/lib/rate-limit", () => fakeRateLimitModule);
 mock.module("@/lib/quotas", () => ({ reserveDailySend: async () => true, reserveApiKeyDailySend: async () => true }));
 
-const { sendEmailHandler, getEmail, createApiKey } = await import("./handlers");
+const { sendEmailHandler, getEmail, emailLogs, createApiKey } = await import("./handlers");
 const { generateJWT } = await import("@/lib/auth");
 
 const domainRow = {
@@ -139,12 +139,23 @@ test("permission kept (send) is enforced - key without send cannot send", async 
   expect(body.error).toContain("can't send");
 });
 
-test("permission kept (send) enforced on getEmail", async () => {
+test("permission kept (send) enforced on email reads", async () => {
   const nosend = `wka_nosend_${"a".repeat(32)}`;
   const req = new Request(`http://localhost/api/emails/${logId}`, { headers: { authorization: `Bearer ${nosend}` } }) as Req;
   (req as unknown as { params: Record<string,string> }).params = { id: logId };
   const res = await getEmail(req);
   expect(res.status).toBe(403);
+  const error = {
+    error: "This API key can't retrieve emails. Create a key with send permission.",
+  };
+  expect(await res.json()).toEqual(error);
+
+  const logsReq = new Request("http://localhost/api/emails/logs", {
+    headers: { authorization: `Bearer ${nosend}` },
+  }) as Req;
+  const logsRes = await emailLogs(logsReq);
+  expect(logsRes.status).toBe(403);
+  expect(await logsRes.json()).toEqual(error);
 });
 
 test("createApiKey rejects receive permission via schema", async () => {

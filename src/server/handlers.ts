@@ -795,6 +795,12 @@ export async function emailLogs(req: Req): Promise<Response> {
   let scopedUserId: string;
   if (auth.startsWith("Bearer wka_")) {
     const apiKey = await requireApiKey(req);
+    if (!apiKey.permissions.includes("send")) {
+      return json(
+        { error: "This API key can't retrieve emails. Create a key with send permission." },
+        403,
+      );
+    }
     domainIds = [apiKey.domain_id];
     scopedUserId = apiKey.user_id;
   } else {
