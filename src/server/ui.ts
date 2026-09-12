@@ -308,9 +308,11 @@ th.right,td.right{text-align:right;white-space:nowrap}
 .copy-value{min-width:0;overflow-wrap:anywhere;padding-top:5px}
 .copy-field .cbtn{margin:0}
 .note{color:var(--ink-3);font-size:13px}
-.keyout{display:flex;gap:12px;align-items:flex-start;margin-top:12px}
-.keyout code{flex:1;background:var(--surface);border-radius:8px;padding:10px 12px;word-break:break-all}
-.key-warning{color:var(--ink-2);font-size:14px;line-height:1.5}
+.key-reveal h2{margin:0 0 12px}
+.keyout{display:flex;gap:12px;align-items:flex-start}
+.keyout code{flex:1;min-width:0;background:var(--surface);border-radius:8px;padding:12px 14px;overflow-wrap:anywhere}
+.keyout .cbtn{flex:0 0 auto;margin-top:3px}
+.key-warning{color:var(--ink-2);font-size:14px;line-height:1.5;margin-top:8px}
 
 /* docs */
 .doc-item{display:block;padding:16px 0;border-top:1px solid var(--line)}
@@ -327,6 +329,14 @@ th.right,td.right{text-align:right;white-space:nowrap}
 .doc p code,.doc li code,.doc td code{background:var(--surface);border-radius:4px;padding:1px 5px;overflow-wrap:anywhere}
 .doc pre code{background:none;padding:0}
 .doc-next{display:flex;justify-content:space-between;gap:16px;margin-top:40px;padding-top:16px;border-top:1px solid var(--line);font-size:13px}
+
+/* key forms */
+.form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px 20px}
+.form-grid label{margin:0}
+.form-wide{grid-column:1/-1}
+.form-help{grid-column:1/-1;color:var(--ink-3);font-size:13px;margin-top:-4px}
+.form-row{display:flex;gap:16px;align-items:flex-end}
+.form-row label{flex:1;margin:0}
 
 /* empty */
 .empty{color:var(--ink-2);padding:40px 0;text-align:left}
@@ -375,9 +385,9 @@ th.right,td.right{text-align:right;white-space:nowrap}
 .filters{display:grid;grid-template-columns:repeat(3,1fr);gap:16px 20px;margin-bottom:32px}
 .filters label{margin:0}
 .filter-actions{grid-column:1/-1;display:flex;gap:12px;align-items:center}
-.key-action-cell{display:flex;gap:6px;justify-content:flex-end;align-items:center}
+.row-actions,.key-action-cell{display:flex;gap:6px;justify-content:flex-end;align-items:center;flex-wrap:wrap}
 .key-expiry-form{display:flex;gap:4px;align-items:center}
-.key-expiry-form input{width:150px;padding:6px 8px;font-size:13px}
+.key-expiry-form input{width:140px;padding:6px 8px;font-size:13px}
 
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @media (max-width:900px){
@@ -405,8 +415,13 @@ th.right,td.right{text-align:right;white-space:nowrap}
   .copy-field{grid-template-columns:64px minmax(0,1fr);gap:8px}
   .copy-field .cbtn{grid-column:2;justify-self:start}
   .keyout{display:block}
-  .keyout .cbtn{margin-bottom:8px}
   .keyout code{display:block}
+  .keyout .cbtn{margin-top:8px}
+  .form-grid{grid-template-columns:1fr}
+  .form-wide,.form-help{grid-column:auto}
+  .form-row{display:block}
+  .form-row label{margin-bottom:12px}
+  .form-row .btn{width:100%}
   .state-head{align-items:flex-start;flex-direction:column}
 }
 @media (max-width:560px){
@@ -1213,40 +1228,48 @@ function domainKeysView(
         <td class="t-mut">${esc(limitLabel)}</td>
         <td class="t-mut">${expiryCell(k.expires_at)}</td>
         <td class="t-mut">${formatDate(k.created_at)}</td>
-        <td class="right key-action-cell">
-          <form class="inline-form key-expiry-form" method="post" action="/ui/domains/${esc(domain.id)}/keys/${esc(k.id)}/expiry">
-            <input type="date" name="expiresAt" value="${k.expires_at ? new Date(k.expires_at).toISOString().slice(0, 10) : ""}" aria-label="Expiry date for ${esc(k.key_name)}">
-            <button type="submit" class="act" data-loading-label="Saving…">Save expiry</button>
-          </form>
-          ${actionForm(`/ui/domains/${esc(domain.id)}/keys/${esc(k.id)}/delete`, "Revoke", "act danger", `Revoke ${k.key_name}? Apps using it stop working.`)}
+        <td class="right">
+          <div class="row-actions key-action-cell">
+            <form class="inline-form key-expiry-form" method="post" action="/ui/domains/${esc(domain.id)}/keys/${esc(k.id)}/expiry">
+              <input type="date" name="expiresAt" value="${k.expires_at ? new Date(k.expires_at).toISOString().slice(0, 10) : ""}" aria-label="Expiry date for ${esc(k.key_name)}">
+              <button type="submit" class="act" data-loading-label="Saving…">Save</button>
+            </form>
+            ${actionForm(`/ui/domains/${esc(domain.id)}/keys/${esc(k.id)}/delete`, "Revoke", "act danger", `Revoke ${k.key_name}? Apps using it stop working.`)}
+          </div>
         </td>
       </tr>`;
     })
     .join("");
-  const form =
+  const createKeyChapter =
     domain.status === "verified"
-      ? `<form class="toolbar" method="post" action="/ui/domains/${esc(domain.id)}/keys" hx-confirm="Create an API key for this domain?">
-           <label><span>Key name</span><input name="keyName" placeholder="Local development" required></label>
-           <label><span>Per-minute limit</span><input name="rateLimitPerMinute" type="number" min="1" max="1000000" placeholder="60"></label>
-           <label><span>Daily limit</span><input name="dailySendLimit" type="number" min="1" max="1000000" placeholder="1000"></label>
-           <label><span>Expires (optional)</span><input type="date" name="expiresAt" aria-label="Expiry date"></label>
-           <button type="submit" class="btn" data-loading-label="Creating…">Create API key</button>
-         </form>`
-       : alert("mut", "Verify this domain first. The API key form will appear here when it is ready.");
-  const testEmail = domain.status === "verified" && keys.length > 0 ? `<div class="block test-email">
-       <div class="block-title">Send a test email</div>
-       <p class="note">Use your verified domain to send a simple message to your inbox. You can track it in email activity.</p>
-       <form class="toolbar" method="post" action="/ui/domains/${esc(domain.id)}/keys">
-         <label><span>Recipient email</span><input name="to" type="email" autocomplete="email" placeholder="you@example.com" required></label>
-         <button type="submit" class="btn" data-loading-label="Sending…">Send test email</button>
-       </form>
-    </div>` : "";
-  return `${banner}${form}
-  ${testEmail}
-  <div class="table-wrap"><table>
-    <thead><tr><th>Name</th><th>Key starts with</th><th>Access</th><th>Limits</th><th>Expires</th><th>Created</th><th class="right">Actions</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="7">${emptyState("No API keys yet", domain.status === "verified" ? "Create your first key to send email from this domain." : "Verify this domain before creating an API key.")}</td></tr>`}</tbody>
-  </table></div>`;
+      ? `<section class="chapter">
+           <h2>Create a key</h2>
+           <form class="form-grid" method="post" action="/ui/domains/${esc(domain.id)}/keys" hx-confirm="Create an API key for this domain?">
+             <label class="form-wide"><span>Key name</span><input name="keyName" placeholder="Production app" required></label>
+             <label><span>Per-minute limit</span><input name="rateLimitPerMinute" type="number" min="1" max="1000000" aria-describedby="key-limit-help"></label>
+             <label><span>Daily limit</span><input name="dailySendLimit" type="number" min="1" max="1000000" aria-describedby="key-limit-help"></label>
+             <label><span>Expires</span><input type="date" name="expiresAt" aria-label="Expiry date"></label>
+             <p id="key-limit-help" class="form-help">Leave blank to use the account defaults: 60 messages per minute and 1,000 messages per day.</p>
+             <button type="submit" class="btn" data-loading-label="Creating…">Create API key</button>
+           </form>
+         </section>`
+      : "";
+  const keyTable = `<section class="chapter">
+      <h2>Keys</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Name</th><th>Key</th><th>Access</th><th>Limits</th><th>Expires</th><th>Created</th><th class="right">Actions</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="7">${emptyState("No API keys yet", domain.status === "verified" ? "Create your first key to send email from this domain." : "Verify this domain before creating an API key.")}</td></tr>`}</tbody>
+      </table></div>
+    </section>`;
+  const testEmailChapter = domain.status === "verified" && keys.length > 0 ? `<section class="chapter test-email">
+      <h2>Send a test email</h2>
+      <p class="section-lede">Send a short message from ${esc(domain.domain)} to your inbox. It shows up in email activity.</p>
+      <form class="form-row" method="post" action="/ui/domains/${esc(domain.id)}/keys">
+        <label><span>Recipient</span><input name="to" type="email" autocomplete="email" placeholder="you@example.com" required></label>
+        <button type="submit" class="btn btn-sm" data-loading-label="Sending…">Send test email</button>
+      </form>
+    </section>` : "";
+  return `${banner}${createKeyChapter}${keyTable}${testEmailChapter}`;
 }
 
 async function sendTestEmail(req: Req, domain: DomainRow, recipient: string, user: AuthUser): Promise<Response> {
@@ -1303,10 +1326,13 @@ async function sendTestEmail(req: Req, domain: DomainRow, recipient: string, use
 }
 
 function keysBody(domain: DomainRow, keys: DomainKeys, banner = ""): string {
+  const verificationNotice = domain.status === "verified"
+    ? ""
+    : `<div class="alert mut" role="status">Verify this domain first. You can create keys once DNS is ready. <a href="/ui/domains/${esc(domain.id)}">Check DNS</a></div>`;
   return `${crumbs([{ label: "Domains", href: "/dashboard" }, { label: domain.domain, href: `/ui/domains/${esc(domain.id)}` }, { label: "API keys" }])}
     <h1>API keys</h1>
-    <p class="lede">Keys let your app send email from ${esc(domain.domain)}. Keep them private.</p>
-    <p class="section-lede">Domain status: ${verifyStatusTag(domain.status)}</p>
+    <p class="lede">Keys let your apps send email from ${esc(domain.domain)}. Keep them private.</p>
+    ${verificationNotice}
     ${domainKeysView(domain, keys, banner)}`;
 }
 
@@ -1376,10 +1402,10 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
     else if (!keyName) banner = alert("err", "Key name is required.");
     else {
       const created = await generateApiKey(user.id, domain.id, keyName, ["send"], { expiresAt, rateLimitPerMinute, dailySendLimit });
-      banner = `<div class="block" role="status">
-        <div class="block-title">Your API key is ready</div>
-        <p class="key-warning">Copy it now. For your security, this full key will not be shown again.</p>
-        <div class="keyout">${copyBtn(created.key, "Copy API key")}<code>${esc(created.key)}</code></div>
+      banner = `<div class="key-reveal" role="status">
+        <h2>Your new API key</h2>
+        <div class="keyout"><code>${esc(created.key)}</code>${copyBtn(created.key, "Copy API key")}</div>
+        <p class="key-warning">Copy it now. It is shown only this once.</p>
       </div>`;
     }
   } catch (err) {
