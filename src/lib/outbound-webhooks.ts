@@ -64,6 +64,7 @@ function isIPv4Private(ip: string): boolean {
   const [a, b] = parts;
   if (a === 10) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
   if (a === 192 && b === 168) return true;
   if (a === 127) return true;
   if (a === 169 && b === 254) return true;
@@ -270,8 +271,12 @@ async function deliverOnce(
       },
       body: rawBody,
       signal: controller.signal,
+      redirect: "manual",
     });
     if (res.ok) return { status: "success", statusCode: res.status, error: null };
+    if (res.status >= 300 && res.status < 400) {
+      return { status: "dead", statusCode: res.status, error: `HTTP ${res.status}: redirects are not followed` };
+    }
     const text = await res.text().catch(() => "");
     const retry = shouldRetryWebhookStatus(res.status);
     return { status: retry ? "retry" : "dead", statusCode: res.status, error: `HTTP ${res.status}${text ? `: ${text.slice(0, 500)}` : ""}` };

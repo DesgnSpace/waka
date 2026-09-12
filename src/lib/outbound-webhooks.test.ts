@@ -229,11 +229,11 @@ test("enqueueOutboundDeliveries scopes to domain owner", async () => {
   expect(call?.sql).toMatch(/SELECT user_id FROM domains WHERE id = \$1/);
 });
 
-test("shouldRetryWebhookStatus retries 5xx, 429 and 408, dead for other 4xx", () => {
+test("shouldRetryWebhookStatus retries 5xx, 429 and 408, dead for 3xx and other 4xx", () => {
   for (const code of [500, 501, 502, 503, 504, 429, 408]) {
     expect(shouldRetryWebhookStatus(code)).toBe(true);
   }
-  for (const code of [400, 401, 403, 404, 405, 410, 413, 422, 451]) {
+  for (const code of [300, 301, 302, 303, 307, 308, 400, 401, 403, 404, 405, 410, 413, 422, 451]) {
     expect(shouldRetryWebhookStatus(code)).toBe(false);
   }
 });
@@ -266,6 +266,10 @@ test("isPrivateIP identifies private ranges", () => {
   expect(isPrivateIP("192.168.0.5")).toBe(true);
   expect(isPrivateIP("172.16.0.1")).toBe(true);
   expect(isPrivateIP("169.254.169.254")).toBe(true);
+  expect(isPrivateIP("100.64.0.1")).toBe(true);
+  expect(isPrivateIP("100.127.255.255")).toBe(true);
+  expect(isPrivateIP("100.63.255.255")).toBe(false);
+  expect(isPrivateIP("100.128.0.1")).toBe(false);
   expect(isPrivateIP("::1")).toBe(true);
   expect(isPrivateIP("8.8.8.8")).toBe(false);
   expect(isPrivateIP("1.1.1.1")).toBe(false);
@@ -280,4 +284,71 @@ test("createWebhookEndpoint rejects private URL", async () => {
   }
   expect(err).toBeDefined();
   expect(String((err as Error).message)).toMatch(/private/i);
+});
+
+function stubDeliveryFetch(response: Response): { calls: RequestInit[] } {
+  const calls: RequestInit[] = [];
+  globalThis.fetch = (async (_input: unknown, init: RequestInit) => {
+    calls.push(init);
+    return response;
+  }) as unknown as typeof fetch;
+  return { calls };
+}
+
+function onePendingDelivery(): void {
+  onFakeQuery((sql) => {
+    if (sql.includes("UPDATE webhook_deliveries wd")) {
+      return {
+        rows: [
+          {
+            id: "00000000-0000-0000-0000-0000000000de",
+            endpoint_id: endpointA,
+            payload: { type: "delivered" },
+            attempts: 1,
+            url: "https://93.184.216.34/hook",
+            secret: "s".repeat(64),
+          },
+        ],
+        rowCount: 1,
+      };
+    }
+    if (sql.includes("RETURNING consecutive_failures")) {
+      return { rows: [{ consecutive_failures: 1, enabled: true }], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+}
+
+test("runOutboundWebhookTick marks a redirect response dead without retrying", async () => {
+  const realFetch = globalThis.fetch;
+  executedQueries.length = 0;
+  onePendingDelivery();
+  const { calls } = stubDeliveryFetch(new Response(null, { status: 302, headers: { location: "http://169.254.169.254/" } }));
+  try {
+    const counts = await outbound.runOutboundWebhookTick();
+    expect(counts).toEqual({ success: 0, retried: 0, dead: 1 });
+    expect(calls[0]?.redirect).toBe("manual");
+    const update = executedQueries.find((q) => q.sql.includes("SET status = 'dead'"));
+    expect(String(update?.params?.[1])).toMatch(/302.*redirects are not followed/);
+    expect(executedQueries.some((q) => q.sql.includes("SET status = 'pending'"))).toBe(false);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("runOutboundWebhookTick keeps success and retry paths", async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    executedQueries.length = 0;
+    onePendingDelivery();
+    stubDeliveryFetch(new Response("ok", { status: 200 }));
+    expect(await outbound.runOutboundWebhookTick()).toEqual({ success: 1, retried: 0, dead: 0 });
+
+    executedQueries.length = 0;
+    onePendingDelivery();
+    stubDeliveryFetch(new Response("boom", { status: 503 }));
+    expect(await outbound.runOutboundWebhookTick()).toEqual({ success: 0, retried: 1, dead: 0 });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
