@@ -27,7 +27,7 @@ Run these steps in order from a fresh clone:
    docker compose up --build -d
    ```
 
-   The API waits for PostgreSQL, then applies every unrecorded `.sql` file in `migrations/`. Applied files are recorded in `schema_migrations`. PostgreSQL 16 provides the `gen_random_uuid()` function used by the schema.
+   The API waits for PostgreSQL, then applies every unrecorded `.sql` file in `migrations/`. Applied files are recorded in `schema_migrations`. PostgreSQL 16 provides the `gen_random_uuid()` function used by the schema. Email log search installs the `pg_trgm` extension, so the database role in `DATABASE_URL` needs `CREATE` on the database.
 
 4. Check the API and create your dashboard account:
 

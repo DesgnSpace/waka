@@ -38,6 +38,7 @@ import {
 } from "@/lib/idempotency";
 import { parseJsonArray, parseJsonObject } from "@/lib/serialization";
 import { findSuppressed, listSuppressions, removeSuppression } from "@/lib/suppression";
+import { normalizeLogsFilters, searchEmailLogs, toRangeEnd, toRangeStart } from "@/lib/email-logs";
 
 type DomainIdRow = DbRow<{ id: string }>;
 type EmailLogRow = DbRow<{
@@ -63,7 +64,6 @@ type EmailLogRow = DbRow<{
   api_key_name: string | null;
 }>;
 type EmailDetailRow = EmailLogRow & { domain_user_id: string };
-type EmailCountRow = DbRow<{ count: string }>;
 type WebhookEventRow = DbRow<{
   id: string;
   event_type: string;
@@ -759,19 +759,39 @@ export async function emailLogs(req: Req): Promise<Response> {
   }
 
   const url = new URL(req.url);
-  const params = z.object({
+  const raw = Object.fromEntries(url.searchParams);
+  const { page, limit } = z.object({
     page: z.coerce.number().int().min(1).max(10_000).default(1),
     limit: z.coerce.number().int().min(1).max(100).default(50),
     domain_id: z.string().uuid().optional(),
     status: z
       .enum(["pending", "sent", "failed", "delivered", "bounced", "complained", "scheduled", "sending"])
       .optional(),
-  }).parse(Object.fromEntries(url.searchParams));
-  const { page, limit, domain_id: domainId, status } = params;
+    recipient: z.string().max(320).optional(),
+    subject: z.string().max(500).optional(),
+    from: z.string().optional(),
+    to: z.string().optional(),
+    from_date: z.string().optional(),
+    to_date: z.string().optional(),
+    start_date: z.string().optional(),
+    end_date: z.string().optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    message_id: z.string().max(255).optional(),
+    messageId: z.string().max(255).optional(),
+  }).parse(raw);
   const offset = (page - 1) * limit;
 
+  const filters = normalizeLogsFilters(raw);
+  if (filters.fromDate && isNaN(Date.parse(filters.fromDate))) {
+    throw new HttpError(400, { error: "Invalid from date. Use ISO 8601." });
+  }
+  if (filters.toDate && isNaN(Date.parse(filters.toDate))) {
+    throw new HttpError(400, { error: "Invalid to date. Use ISO 8601." });
+  }
+
   let domainIds: string[] = [];
-  let scopedUserId: string | null = null;
+  let scopedUserId: string;
   if (auth.startsWith("Bearer wka_")) {
     const apiKey = await requireApiKey(req);
     domainIds = [apiKey.domain_id];
@@ -783,55 +803,17 @@ export async function emailLogs(req: Req): Promise<Response> {
     domainIds = result.rows.map((d) => d.id);
   }
 
-  if (domainIds.length === 0) {
-    return json({
-      success: true,
-      data: { emails: [], pagination: { page, limit, total: 0, totalPages: 0 } },
-    });
-  }
-
-  const queryParams: (string | string[] | number | null)[] = [
+  const { logs: emails, total: totalCount } = await searchEmailLogs({
     domainIds,
-    domainId ?? null,
-    status ?? null,
     scopedUserId,
-  ];
-
-  const countResult = await query<EmailCountRow>(
-    `SELECT COUNT(*) as count FROM email_logs el
-     WHERE el.domain_id = ANY($1)
-       AND ($2::uuid IS NULL OR el.domain_id = $2)
-       AND ($3::text IS NULL OR el.status = $3)
-       AND EXISTS (SELECT 1 FROM domains d WHERE d.id = el.domain_id AND d.user_id = $4)`,
-    queryParams
-  );
-  const totalCount = parseInt(countResult.rows[0].count);
-
-  const emailLogsResult = await query<EmailLogRow>(
-     `SELECT el.*, d.domain as domain_name, ak.key_name as api_key_name
-      FROM email_logs el
-      JOIN domains d ON el.domain_id = d.id AND d.user_id = $4
-     LEFT JOIN api_keys ak ON el.api_key_id = ak.id
-       AND ak.user_id = d.user_id AND ak.domain_id = el.domain_id
-     WHERE el.domain_id = ANY($1)
-       AND ($2::uuid IS NULL OR el.domain_id = $2)
-       AND ($3::text IS NULL OR el.status = $3)
-     ORDER BY el.created_at DESC
-     LIMIT $5 OFFSET $6`,
-     [...queryParams, limit, offset]
-  );
-
-  // payload carries the raw scheduled request body (attachment bytes included)
-  // and is for the sender, never for API readers.
-  const emails = emailLogsResult.rows.map(({ payload: _payload, ...row }) => ({
-    ...row,
-    to_emails: parseJsonArray(row.to_emails, "to_emails"),
-    cc_emails: parseJsonArray(row.cc_emails, "cc_emails"),
-    bcc_emails: parseJsonArray(row.bcc_emails, "bcc_emails"),
-    attachments: parseJsonArray(row.attachments, "attachments"),
-    domains: row.domain_name ? { domain: row.domain_name } : null,
-    api_keys: row.api_key_name ? { key_name: row.api_key_name } : null,
-  }));
+    filters: {
+      ...filters,
+      fromDate: filters.fromDate ? toRangeStart(filters.fromDate) : null,
+      toDate: filters.toDate ? toRangeEnd(filters.toDate) : null,
+    },
+    limit,
+    offset,
+  });
 
   return json({
     success: true,
