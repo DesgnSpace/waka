@@ -2,6 +2,7 @@ import * as Sentry from "@sentry/bun";
 import { query, transaction, type DbRow } from "./database";
 import { errorMessage } from "./errors";
 import { sendEmail, type EmailAttachment } from "./ses";
+import { bareAddress, findSuppressed } from "./suppression";
 
 // Cron granularity is one minute, matching Resend's scheduling precision.
 const CRON_SCHEDULE = "* * * * *";
@@ -189,7 +190,18 @@ export async function storeScheduledEmail(input: ScheduleEmailInput): Promise<st
   return result.rows[0].id;
 }
 
-type ClaimedRow = DbRow<{ id: string; send_attempts: number; payload: unknown }>;
+type ClaimedRow = DbRow<{
+  id: string;
+  domain_id: string;
+  send_attempts: number;
+  payload: unknown;
+}>;
+
+type CurrentDeliveryState = DbRow<{
+  api_key_id: string | null;
+  expires_at: Date | string | null;
+  domain_status: string | null;
+}>;
 
 async function claimDueSends(): Promise<ClaimedRow[]> {
   return transaction(async (client) => {
@@ -208,7 +220,7 @@ async function claimDueSends(): Promise<ClaimedRow[]> {
        SET status = 'sending', send_attempts = el.send_attempts + 1
        FROM due
        WHERE el.id = due.id
-       RETURNING el.id, el.send_attempts, el.payload`,
+       RETURNING el.id, el.domain_id, el.send_attempts, el.payload`,
       [String(STALE_CLAIM_SECONDS), CLAIM_BATCH_SIZE],
     );
     return result.rows;
@@ -217,12 +229,48 @@ async function claimDueSends(): Promise<ClaimedRow[]> {
 
 type DeliveryOutcome = "sent" | "retried" | "failed";
 
+class PermanentDeliveryError extends Error {}
+
+async function validateCurrentDelivery(row: ClaimedRow, payload: StoredPayload): Promise<void> {
+  const state = await query<CurrentDeliveryState>(
+    `SELECT ak.id AS api_key_id, ak.expires_at, d.status AS domain_status
+     FROM email_logs el
+     LEFT JOIN api_keys ak ON ak.id = el.api_key_id
+     LEFT JOIN domains d ON d.id = el.domain_id
+     WHERE el.id = $1`,
+    [row.id],
+  );
+  const current = state.rows[0];
+
+  if (!current?.api_key_id) {
+    throw new PermanentDeliveryError("API key revoked");
+  }
+  if (current.expires_at && new Date(current.expires_at).getTime() <= Date.now()) {
+    throw new PermanentDeliveryError("API key expired");
+  }
+  if (current.domain_status !== "verified") {
+    throw new PermanentDeliveryError("Domain no longer verified");
+  }
+
+  const recipients = [...payload.to, ...(payload.cc ?? []), ...(payload.bcc ?? [])].map(bareAddress);
+  const suppressed = await findSuppressed(row.domain_id, recipients);
+  if (suppressed.length === 0) return;
+
+  const list = suppressed.join(", ");
+  const message =
+    suppressed.length === 1
+      ? `Recipient ${list} previously bounced or was marked as spam for this domain and won't receive mail. Remove it from the suppression list to send again.`
+      : `Recipients ${list} previously bounced or were marked as spam for this domain and won't receive mail. Remove them from the suppression list to send again.`;
+  throw new PermanentDeliveryError(message);
+}
+
 async function deliver(row: ClaimedRow): Promise<DeliveryOutcome> {
   try {
     const payload = row.payload as StoredPayload | null;
     if (!payload || typeof payload.from !== "string") {
       throw new Error("Scheduled email has no stored payload");
     }
+    await validateCurrentDelivery(row, payload);
     const messageId = await sendEmail(payload);
     await query(
       `UPDATE email_logs
@@ -233,6 +281,13 @@ async function deliver(row: ClaimedRow): Promise<DeliveryOutcome> {
     return "sent";
   } catch (err) {
     const reason = errorMessage(err);
+    if (err instanceof PermanentDeliveryError) {
+      await query(`UPDATE email_logs SET status = 'failed', error_message = $2 WHERE id = $1`, [
+        row.id,
+        reason,
+      ]);
+      return "failed";
+    }
     const plan = planAfterFailure(row.send_attempts);
     if (plan.action === "abandon") {
       await query(`UPDATE email_logs SET status = 'failed', error_message = $2 WHERE id = $1`, [

@@ -1,4 +1,3 @@
-import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { query } from "./database";
@@ -12,12 +11,21 @@ const authClaimsSchema = z.object({
   name: z.string().optional(),
 });
 
+// Shared with the boot-time check in server.ts so the two can't drift apart.
+export function sessionSecretError(secret: string | undefined): string | null {
+  if (!secret || secret.length < 32) {
+    return "NEXTAUTH_SECRET must be set to at least 32 characters";
+  }
+  return null;
+}
+
 function jwtSecret(): string {
   const secret = process.env.NEXTAUTH_SECRET;
-  if (!secret || secret.length < 32) {
-    throw new Error("NEXTAUTH_SECRET must be set to at least 32 characters");
+  const error = sessionSecretError(secret);
+  if (error) {
+    throw new Error(error);
   }
-  return secret;
+  return secret as string;
 }
 
 export interface AuthUser {
@@ -30,14 +38,14 @@ export async function hashPassword(password: string): Promise<string> {
   if (Buffer.byteLength(password, "utf8") > 72) {
     throw new Error("Password must be at most 72 UTF-8 bytes");
   }
-  return bcrypt.hash(password, 12);
+  return Bun.password.hash(password, { algorithm: "bcrypt", cost: 12 });
 }
 
 export async function verifyPassword(
   password: string,
   hash: string
 ): Promise<boolean> {
-  return bcrypt.compare(password, hash);
+  return Bun.password.verify(password, hash);
 }
 
 export function generateJWT(user: AuthUser): string {

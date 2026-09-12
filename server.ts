@@ -14,8 +14,17 @@ import { startPruneJob } from "@/lib/prune";
 import { startScheduledSendJob } from "@/lib/scheduled-sends";
 import { startOutboundWebhookJob } from "@/lib/outbound-webhooks";
 import { bindServer } from "@/lib/rate-limit";
+import { sessionSecretError } from "@/lib/auth";
 
 const port = Number(process.env.PORT ?? 3000);
+
+// Same rule jwtSecret() applies at sign-in time; checked here too so a
+// container with a bad secret never reports healthy.
+const secretError = sessionSecretError(process.env.NEXTAUTH_SECRET);
+if (secretError) {
+  console.error(secretError);
+  process.exit(1);
+}
 
 // Apply pending schema migrations before accepting traffic. Fail fast: a
 // half-migrated schema serving requests is worse than a failed deploy.

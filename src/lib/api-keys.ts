@@ -1,5 +1,4 @@
 import { customAlphabet } from "nanoid";
-import bcrypt from "bcryptjs";
 import { query } from "./database";
 import type { ApiKey, DbRow } from "./database";
 import { errorMessage } from "./errors";
@@ -82,7 +81,7 @@ export async function generateApiKey(
   )();
   const apiKey = `wka_${keyId}_${keySecret}`; // wka = Waka
 
-  const keyHash = await bcrypt.hash(apiKey, 10);
+  const keyHash = await Bun.password.hash(apiKey, { algorithm: "bcrypt", cost: 10 });
 
   const sanitized = sanitizePermissions(permissions);
   const finalPermissions = sanitized.length ? sanitized : ["send"];
@@ -154,7 +153,7 @@ export async function verifyApiKey(
   );
 
   for (const key of result.rows) {
-    const isValid = await bcrypt.compare(apiKey, key.key_hash);
+    const isValid = await Bun.password.verify(apiKey, key.key_hash);
     if (isValid) {
       const expiresAt = key.expires_at;
       if (expiresAt && new Date(expiresAt).getTime() <= Date.now()) {
@@ -239,58 +238,6 @@ export async function deleteApiKey(
     }
   } catch (error: unknown) {
     throw new Error(`Couldn't delete API key: ${errorMessage(error)}`);
-  }
-}
-
-export async function updateApiKeyPermissions(
-  keyId: string,
-  userId: string,
-  permissions: string[]
-): Promise<void> {
-  const sanitized = sanitizePermissions(permissions);
-  if (!sanitized.length) throw new Error("At least one valid permission is required.");
-  try {
-    const result = await query(
-      "UPDATE api_keys SET permissions = $1 WHERE id = $2 AND user_id = $3",
-      [JSON.stringify(sanitized), keyId, userId]
-    );
-
-    if (result.rowCount === 0) {
-      throw new Error("API key not found or you don't have access.");
-    }
-  } catch (error: unknown) {
-    throw new Error(`Couldn't update API key permissions: ${errorMessage(error)}`);
-  }
-}
-
-export async function updateApiKeyLimits(
-  keyId: string,
-  userId: string,
-  limits: { rateLimitPerMinute?: number | null; dailySendLimit?: number | null }
-): Promise<void> {
-  const sets: string[] = [];
-  const params: unknown[] = [];
-  let idx = 1;
-  if ("rateLimitPerMinute" in limits) {
-    sets.push(`rate_limit_per_minute = $${idx++}`);
-    params.push(limits.rateLimitPerMinute ?? null);
-  }
-  if ("dailySendLimit" in limits) {
-    sets.push(`daily_send_limit = $${idx++}`);
-    params.push(limits.dailySendLimit ?? null);
-  }
-  if (sets.length === 0) return;
-  params.push(keyId, userId);
-  try {
-    const result = await query(
-      `UPDATE api_keys SET ${sets.join(", ")} WHERE id = $${idx++} AND user_id = $${idx++}`,
-      params
-    );
-    if (result.rowCount === 0) {
-      throw new Error("API key not found or you don't have access.");
-    }
-  } catch (error: unknown) {
-    throw new Error(`Couldn't update API key: ${errorMessage(error)}`);
   }
 }
 

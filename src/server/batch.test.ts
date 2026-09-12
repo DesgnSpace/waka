@@ -1,7 +1,7 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 import { HttpError } from "./http";
 import type { Req } from "./http";
-import { executedQueries, installFakeDatabase, onFakeQuery } from "@/lib/fake-database";
+import { executedQueries, installFakeDatabase, onFakeQuery, type FakeQueryResult } from "@/lib/fake-database";
 import { fakeRateLimitModule } from "@/lib/fake-rate-limit";
 
 const userId = "11111111-1111-4111-8111-111111111111";
@@ -36,8 +36,6 @@ mock.module("@/lib/api-keys", () => ({
   generateApiKey: async () => { throw new Error("not used"); },
   getUserApiKeys: async () => [],
   deleteApiKey: async () => {},
-  updateApiKeyPermissions: async () => {},
-  updateApiKeyLimits: async () => {},
 }));
 mock.module("@/lib/ses", () => ({
   sendEmail,
@@ -92,6 +90,60 @@ const domainRow = {
   updated_at: new Date(0).toISOString(),
 };
 
+function defaultRoute(sql: string, params: unknown[] = []): FakeQueryResult {
+  if (sql.includes("FROM suppressions")) {
+    const emails = (params[1] as string[]) ?? [];
+    const suppressed = emails.filter((e) => e.toLowerCase() === "blocked@example.com");
+    return { rows: suppressed.map((email) => ({ email })), rowCount: suppressed.length };
+  }
+  if (sql.includes("FROM domains")) {
+    return params[0] === domainId && params[1] === userId ? { rows: [domainRow], rowCount: 1 } : { rows: [], rowCount: 0 };
+  }
+  if (sql.includes("INSERT INTO email_logs")) return { rows: [{ id: `log-${Math.random()}` }], rowCount: 1 };
+  return { rows: [], rowCount: 0 };
+}
+
+// Stateful stand-in for the idempotency_keys table, keyed by (api_key_id, key)
+// like the unique index so claims, replays and releases run the real SQL.
+function idempotencyStore() {
+  const rows = new Map<string, { id: string; status: string; response_status?: number; response_body?: unknown; updated_at: Date }>();
+  let claimSeq = 0;
+
+  const route = (sql: string, params: unknown[] = []): FakeQueryResult => {
+    if (sql.includes("INTO idempotency_keys")) {
+      const mapKey = `${params[0]}|${params[1]}`;
+      if (rows.has(mapKey)) return { rows: [], rowCount: 0 };
+      const id = `aaaaaaaa-0000-4000-8000-${String(++claimSeq).padStart(12, "0")}`;
+      rows.set(mapKey, { id, status: "pending", updated_at: new Date() });
+      return { rows: [{ id }], rowCount: 1 };
+    }
+    if (sql.includes("DELETE FROM idempotency_keys")) {
+      for (const [mapKey, row] of [...rows.entries()]) {
+        if (row.id === params[0] && row.status === "pending") {
+          rows.delete(mapKey);
+          return { rows: [], rowCount: 1 };
+        }
+      }
+      return { rows: [], rowCount: 0 };
+    }
+    if (sql.includes("FROM idempotency_keys")) {
+      const row = rows.get(`${params[0]}|${params[1]}`);
+      return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+    if (sql.includes("UPDATE idempotency_keys") && sql.includes("status = 'completed'")) {
+      const row = [...rows.values()].find((r) => r.id === params[0]);
+      if (!row) return { rows: [], rowCount: 0 };
+      row.status = "completed";
+      row.response_status = params[1] as number;
+      row.response_body = JSON.parse(params[2] as string);
+      return { rows: [], rowCount: 1 };
+    }
+    return defaultRoute(sql, params);
+  };
+
+  return { rows, route };
+}
+
 beforeEach(() => {
   currentApiKey = { ...apiKey };
   rateLimitShouldFail = false;
@@ -102,18 +154,7 @@ beforeEach(() => {
   sesBehavior = async () => `ses-${Math.random().toString(36).slice(2, 8)}`;
   sendEmail.mockClear();
   executedQueries.length = 0;
-  onFakeQuery((sql, params = []) => {
-    if (sql.includes("FROM suppressions")) {
-      const emails = (params[1] as string[]) ?? [];
-      const suppressed = emails.filter((e) => e.toLowerCase() === "blocked@example.com");
-      return { rows: suppressed.map((email) => ({ email })), rowCount: suppressed.length };
-    }
-    if (sql.includes("FROM domains")) {
-      return params[0] === domainId && params[1] === userId ? { rows: [domainRow], rowCount: 1 } : { rows: [], rowCount: 0 };
-    }
-    if (sql.includes("INSERT INTO email_logs")) return { rows: [{ id: `log-${Math.random()}` }], rowCount: 1 };
-    return { rows: [], rowCount: 0 };
-  });
+  onFakeQuery(defaultRoute);
 });
 
 function batchRequest(body: unknown, extraHeaders: Record<string, string> = {}): Req {
@@ -217,4 +258,27 @@ test("non-array body is rejected with 400", async () => {
   }
   expect(thrown).toBeInstanceOf(HttpError);
   expect((thrown as HttpError).status).toBe(400);
+});
+
+test("a batch rejected in validation frees the key so a corrected retry is sent", async () => {
+  const store = idempotencyStore();
+  onFakeQuery(store.route);
+
+  const rejected = await sendBatchHandler(
+    batchRequest([{ from: "sender@example.com", to: ["a@example.com"], subject: "", text: "hi" }], {
+      "idempotency-key": "batch-retry",
+    })
+  );
+  expect(rejected.status).toBe(207);
+  const rejectedBody = (await rejected.json()) as { data: Array<{ statusCode: number }> };
+  expect(rejectedBody.data[0].statusCode).toBe(422);
+  expect(sendEmail.mock.calls.length).toBe(0);
+  expect(store.rows.size).toBe(0);
+
+  const retry = await sendBatchHandler(
+    batchRequest([goodItem("a@example.com")], { "idempotency-key": "batch-retry" })
+  );
+  expect(retry.status).toBe(200);
+  expect(retry.headers.get("idempotency-replayed")).toBeNull();
+  expect(sendEmail.mock.calls.length).toBe(1);
 });

@@ -1,4 +1,5 @@
 import { beforeEach, expect, mock, test } from "bun:test";
+import { NON_PUBLIC_DOMAIN_SUFFIXES } from "@/lib/email-dns-readiness";
 import { HttpError } from "./http";
 
 const counts = new Map<string, number>();
@@ -25,16 +26,37 @@ mock.module("node:dns", () => ({
 const { emailDnsChecker } = await import("./handlers");
 import type { Req } from "./http";
 
-function dnsReq(): Req {
+function dnsReq(domain = "example.com"): Req {
   return new Request("http://localhost/api/tools/email-dns-checker", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ domain: "example.com" }),
+    body: JSON.stringify({ domain }),
   }) as Req;
+}
+
+async function expectValidationError(domain: string): Promise<void> {
+  const res = await emailDnsChecker(dnsReq(domain));
+  expect(res.status).toBe(400);
+  expect(await res.json()).toEqual({ error: "Enter a public domain such as example.com." });
 }
 
 beforeEach(() => {
   counts.clear();
+});
+
+test("dns checker rejects IP literals", async () => {
+  await expectValidationError("127.0.0.1");
+  await expectValidationError("2001:db8::1");
+});
+
+for (const suffix of NON_PUBLIC_DOMAIN_SUFFIXES) {
+  test(`dns checker rejects .${suffix} names`, async () => {
+    await expectValidationError(`mail.${suffix}`);
+  });
+}
+
+test("dns checker rejects single-label names", async () => {
+  await expectValidationError("foo");
 });
 
 test("dns checker allows 10 requests then returns 429 on the 11th from same IP", async () => {

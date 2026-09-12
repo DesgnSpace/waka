@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 export type EmailDnsStatus = "pass" | "warn" | "fail" | "info";
 
 export type EmailDnsCheck = {
@@ -36,6 +38,24 @@ const statusRank: Record<EmailDnsStatus, number> = {
   fail: 3,
 };
 
+export const NON_PUBLIC_DOMAIN_SUFFIXES: readonly string[] = [
+  "internal",
+  "local",
+  "localhost",
+  "localdomain",
+  "home",
+  "lan",
+  "corp",
+  "intranet",
+  "private",
+  "arpa",
+  "consul",
+  "onion",
+  "test",
+  "example",
+  "invalid",
+];
+
 function isValidDomainLabel(label: string): boolean {
   return (
     label.length > 0 &&
@@ -57,8 +77,16 @@ export function normalizeDomain(input: string): string {
     .replace(/\.$/, "");
   const withoutPort = stripped.includes(":") ? stripped.split(":")[0] : stripped;
   const labels = withoutPort.split(".");
+  const lastLabel = labels[labels.length - 1];
+  const isIpLiteral = isIP(stripped) !== 0 || isIP(withoutPort) !== 0;
 
-  if (withoutPort.length < 4 || withoutPort.length > 253 || labels.length < 2) {
+  if (
+    withoutPort.length < 4 ||
+    withoutPort.length > 253 ||
+    labels.length < 2 ||
+    isIpLiteral ||
+    NON_PUBLIC_DOMAIN_SUFFIXES.includes(lastLabel)
+  ) {
     throw new Error("Enter a public domain such as example.com.");
   }
 

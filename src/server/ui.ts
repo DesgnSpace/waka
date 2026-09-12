@@ -27,6 +27,7 @@ import { query } from "@/lib/database";
 import { buildEmailLogsWhere, normalizeLogsFilters, toRangeEnd, toRangeStart, type EmailLogsFilters } from "@/lib/email-logs";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 import { reserveDailySend } from "@/lib/quotas";
+import { isEmailAddress } from "@/lib/email";
 import { DOC_TOPICS, findDocTopic } from "./docs";
 
 // --- helpers -----------------------------------------------------------------
@@ -44,6 +45,8 @@ function html(body: string, init: ResponseInit = {}): Response {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Content-Security-Policy": CSP,
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "same-origin",
       ...(init.headers ?? {}),
     },
   });
@@ -891,10 +894,11 @@ export async function uiDomainDns(req: Req): Promise<Response> {
     return new Response("This domain was not found. Return to the domains list and try again.", { status: 404 });
   }
   const records: DnsRecord[] = domain.dns_records;
+  const filename = domain.domain.replace(/[^A-Za-z0-9.-]/g, "_");
   return new Response(zoneFile(domain.domain, records), {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${domain.domain}.txt"`,
+      "Content-Disposition": `attachment; filename="${filename}.txt"`,
     },
   });
 }
@@ -1126,7 +1130,7 @@ function domainKeysView(
 }
 
 async function sendTestEmail(req: Req, domain: DomainRow, recipient: string, user: AuthUser): Promise<Response> {
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+  if (!isEmailAddress(recipient)) {
     return seeOther(`/ui/domains/${domain.id}?m=test-recipient`);
   }
   if (domain.status !== "verified") return seeOther(`/ui/domains/${domain.id}?m=test-pending`);

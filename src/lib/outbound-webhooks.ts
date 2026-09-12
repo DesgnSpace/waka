@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import net from "node:net";
 import { lookup } from "node:dns/promises";
+import type { LookupAddress } from "node:dns";
 import * as Sentry from "@sentry/bun";
 import { db, query, transaction } from "./database";
 
@@ -13,7 +14,10 @@ export const INITIAL_DELAY_SECONDS = 60;
 export const MAX_DELAY_SECONDS = 60 * 60 * 4;
 export const DELIVERY_TIMEOUT_MS = 10_000;
 export const DELIVERY_BATCH_SIZE = 25;
+export const MAX_ERROR_BODY_BYTES = 4096;
 export const DISABLE_AFTER_CONSECUTIVE_FAILURES = 5;
+// Advisory lock keys in use: 724242 migrate, 724243 prune, 724244 outbound
+// webhooks, 724245 rate-limit purge.
 export const OUTBOUND_LOCK_KEY = 724_244;
 export const OUTBOUND_CRON_SCHEDULE = "* * * * *";
 
@@ -58,47 +62,110 @@ export function planAfterDeliveryFailure(attempts: number, now: Date = new Date(
   return { action: "retry", retryAt: nextAttemptAt(attempts, now) };
 }
 
-function isIPv4Private(ip: string): boolean {
-  const parts = ip.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) return false;
-  const [a, b] = parts;
-  if (a === 10) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 127) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 0) return true;
+const IPV4_MAPPED_PREFIX = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff];
+
+// [network, prefix length] for 0.0.0.0/8, 10/8, 100.64/10, 127/8, 169.254/16,
+// 172.16/12, 192.168/16, 224/4 multicast and 240/4 reserved.
+const BLOCKED_IPV4_RANGES: Array<[number, number]> = [
+  [0x00000000, 8],
+  [0x0a000000, 8],
+  [0x64400000, 10],
+  [0x7f000000, 8],
+  [0xa9fe0000, 16],
+  [0xac100000, 12],
+  [0xc0a80000, 16],
+  [0xe0000000, 4],
+  [0xf0000000, 4],
+];
+
+function parseIPv4Octets(text: string): number[] | null {
+  const parts = text.split(".");
+  if (parts.length !== 4) return null;
+  const octets: number[] = [];
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const value = Number(part);
+    if (value > 255) return null;
+    octets.push(value);
+  }
+  return octets;
+}
+
+function parseHextets(parts: string[], allowEmbeddedIPv4: boolean): number[] | null {
+  const bytes: number[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (part.includes(".")) {
+      if (!allowEmbeddedIPv4 || i !== parts.length - 1) return null;
+      const octets = parseIPv4Octets(part);
+      if (!octets) return null;
+      bytes.push(...octets);
+      continue;
+    }
+    if (!/^[0-9a-f]{1,4}$/i.test(part)) return null;
+    const value = Number.parseInt(part, 16);
+    bytes.push(value >> 8, value & 0xff);
+  }
+  return bytes;
+}
+
+function parseIPv6Bytes(literal: string): Uint8Array | null {
+  const halves = literal.split("%")[0].split("::");
+  if (halves.length > 2) return null;
+  const compressed = halves.length === 2;
+  const head = halves[0] ? parseHextets(halves[0].split(":"), !compressed) : [];
+  const tail = compressed && halves[1] ? parseHextets(halves[1].split(":"), true) : [];
+  if (!head || !tail) return null;
+  if (!compressed) return head.length === 16 ? Uint8Array.from(head) : null;
+  const gap = 16 - head.length - tail.length;
+  if (gap < 1) return null;
+  return Uint8Array.from([...head, ...Array<number>(gap).fill(0), ...tail]);
+}
+
+function addressBytes(literal: string): Uint8Array | null {
+  const family = net.isIP(literal);
+  if (family === 4) {
+    const octets = parseIPv4Octets(literal);
+    return octets ? Uint8Array.from([...IPV4_MAPPED_PREFIX, ...octets]) : null;
+  }
+  if (family === 6) return parseIPv6Bytes(literal);
+  return null;
+}
+
+function embedsIPv4(bytes: Uint8Array): boolean {
+  if (bytes.subarray(0, 10).some((b) => b !== 0)) return false;
+  return (bytes[10] === 0 && bytes[11] === 0) || (bytes[10] === 0xff && bytes[11] === 0xff);
+}
+
+function isBlockedIPv4(bytes: Uint8Array): boolean {
+  const value = ((bytes[12] << 24) | (bytes[13] << 16) | (bytes[14] << 8) | bytes[15]) >>> 0;
+  return BLOCKED_IPV4_RANGES.some(([network, bits]) => {
+    const mask = (0xffffffff << (32 - bits)) >>> 0;
+    return ((value & mask) >>> 0) === network;
+  });
+}
+
+function isBlockedAddress(bytes: Uint8Array): boolean {
+  if (embedsIPv4(bytes)) return isBlockedIPv4(bytes);
+  if ((bytes[0] & 0xfe) === 0xfc) return true;
+  if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return true;
+  if (bytes[0] === 0xff) return true;
   return false;
 }
 
-function isIPv6Private(ip: string): boolean {
-  const lower = ip.toLowerCase();
-  if (lower === "::1") return true;
-  if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
-  if (lower.startsWith("fe80")) return true;
-  if (lower.includes(".")) {
-    const lastColon = lower.lastIndexOf(":");
-    const v4 = lower.slice(lastColon + 1);
-    if (net.isIP(v4) === 4 && isIPv4Private(v4)) return true;
-  }
-  if (lower === "::ffff:127.0.0.1") return true;
-  return false;
+function stripBrackets(host: string): string {
+  return host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
 }
 
 export function isPrivateIP(host: string): boolean {
-  const clean = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
-  const family = net.isIP(clean);
-  if (family === 4) return isIPv4Private(clean);
-  if (family === 6) return isIPv6Private(clean);
-  return false;
+  const bracketed = host.startsWith("[") && host.endsWith("]");
+  const bytes = addressBytes(bracketed ? host.slice(1, -1) : host);
+  return bytes ? isBlockedAddress(bytes) : bracketed;
 }
 
 function isBlockedHostname(host: string): boolean {
-  const clean = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
-  const h = clean.toLowerCase();
-  if (h === "localhost" || h.endsWith(".localhost")) return true;
-  return false;
+  const h = stripBrackets(host).toLowerCase();
+  return h === "localhost" || h.endsWith(".localhost");
 }
 
 export function isValidWebhookUrl(raw: string): boolean {
@@ -120,7 +187,7 @@ export function shouldRetryWebhookStatus(status: number): boolean {
   return status >= 500 || status === 429 || status === 408;
 }
 
-async function isDeliveryUrlBlocked(urlStr: string): Promise<boolean> {
+export async function isDeliveryUrlBlocked(urlStr: string): Promise<boolean> {
   let hostname: string;
   try {
     hostname = new URL(urlStr).hostname;
@@ -129,17 +196,15 @@ async function isDeliveryUrlBlocked(urlStr: string): Promise<boolean> {
   }
   if (isBlockedHostname(hostname)) return true;
   if (isPrivateIP(hostname)) return true;
-  const clean = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
-  if (net.isIP(clean) !== 0) return false;
+  if (net.isIP(stripBrackets(hostname)) !== 0) return false;
+  let addresses: LookupAddress[];
   try {
-    const addresses = await lookup(hostname, { all: true });
-    for (const a of addresses) {
-      if (isPrivateIP(a.address)) return true;
-    }
+    addresses = await lookup(hostname, { all: true });
   } catch {
-    return false;
+    return true;
   }
-  return false;
+  if (addresses.length === 0) return true;
+  return addresses.some((a) => isPrivateIP(a.address));
 }
 
 export interface WebhookEndpointRow {
@@ -249,18 +314,44 @@ export interface DeliveryAttemptResult {
   error: string | null;
 }
 
+async function readErrorBody(res: Response): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < MAX_ERROR_BODY_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      size += value.length;
+    }
+  } catch {
+    return "";
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  const buffer = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buffer.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return new TextDecoder().decode(buffer.subarray(0, MAX_ERROR_BODY_BYTES));
+}
+
 async function deliverOnce(
   delivery: WebhookDeliveryRow & { url: string; secret: string },
   rawBody: string,
 ): Promise<DeliveryAttemptResult> {
-  if (await isDeliveryUrlBlocked(delivery.url)) {
-    return { status: "dead", statusCode: null, error: "Webhook URL resolves to a private or blocked address" };
-  }
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const signature = computeSignature(delivery.secret, timestamp, rawBody);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
   try {
+    if (await isDeliveryUrlBlocked(delivery.url)) {
+      return { status: "dead", statusCode: null, error: "Webhook URL resolves to a private or blocked address" };
+    }
     const res = await fetch(delivery.url, {
       method: "POST",
       headers: {
@@ -277,7 +368,7 @@ async function deliverOnce(
     if (res.status >= 300 && res.status < 400) {
       return { status: "dead", statusCode: res.status, error: `HTTP ${res.status}: redirects are not followed` };
     }
-    const text = await res.text().catch(() => "");
+    const text = await readErrorBody(res);
     const retry = shouldRetryWebhookStatus(res.status);
     return { status: retry ? "retry" : "dead", statusCode: res.status, error: `HTTP ${res.status}${text ? `: ${text.slice(0, 500)}` : ""}` };
   } catch (err) {
