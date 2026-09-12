@@ -57,6 +57,8 @@ const SIGNED_KEYS: Record<string, Array<keyof SnsMessage>> = {
 const CERT_CACHE_TTL_MS = 60 * 60 * 1000;
 const CERT_CACHE_MAX_ENTRIES = 50;
 const certCache = new TtlCache<string>(CERT_CACHE_TTL_MS, CERT_CACHE_MAX_ENTRIES);
+const CERT_FETCH_TIMEOUT_MS = 5000;
+const CERT_MAX_BYTES = 64 * 1024;
 const snsHostPattern = /^sns\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$/i;
 
 function isValidSnsUrl(rawUrl: string): URL | null {
@@ -81,11 +83,31 @@ async function fetchCert(certUrl: string): Promise<string> {
   const cached = certCache.get(certUrl, Date.now());
   if (cached) return cached;
 
-  const res = await fetch(certUrl);
-  if (!res.ok) {
-    throw new Error(`Couldn't fetch SNS signing certificate: ${res.status}`);
+  const failed = () => new Error(`Couldn't fetch SNS signing certificate: ${certUrl}`);
+
+  let res: Response;
+  try {
+    res = await fetch(certUrl, { signal: AbortSignal.timeout(CERT_FETCH_TIMEOUT_MS) });
+  } catch {
+    throw failed();
   }
-  const pem = await res.text();
+  if (!res.ok || !res.body) throw failed();
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > CERT_MAX_BYTES) {
+      await reader.cancel();
+      throw failed();
+    }
+    chunks.push(value);
+  }
+
+  const pem = Buffer.concat(chunks).toString("utf8");
   certCache.set(certUrl, pem, Date.now());
   return pem;
 }

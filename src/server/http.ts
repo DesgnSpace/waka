@@ -120,7 +120,7 @@ function wrap(fn: Handler): Handler {
       }
       console.error("API error:", err);
       Sentry.withScope((scope) => {
-        scope.setContext("request", { method: req.method, url: req.url });
+        scope.setContext("request", { method: req.method, path: new URL(req.url).pathname, status: 500 });
         Sentry.captureException(err);
       });
       return mergeCors(json({ error: "Internal server error" }, 500), origin);
