@@ -13,6 +13,12 @@ test("no setup route is registered or stubbed", () => {
   expect(source("src/server/handlers.ts")).not.toMatch(/export (async )?function setup\b/);
 });
 
+test("docs are dashboard-only and add nothing to the JSON API", () => {
+  const app = source("src/server/app.ts");
+  const registered = [...app.matchAll(/"(\/[^"]*docs[^"]*)"/g)].map((match) => match[1]);
+  expect(registered).toEqual(["/ui/docs", "/ui/docs/:topic"]);
+});
+
 test("no documented environment variable goes unread", () => {
   const files = [
     ".env.example",

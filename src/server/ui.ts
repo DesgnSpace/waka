@@ -27,6 +27,7 @@ import { query } from "@/lib/database";
 import { buildEmailLogsWhere, normalizeLogsFilters, toRangeEnd, toRangeStart, type EmailLogsFilters } from "@/lib/email-logs";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 import { reserveDailySend } from "@/lib/quotas";
+import { DOC_TOPICS, findDocTopic } from "./docs";
 
 // --- helpers -----------------------------------------------------------------
 
@@ -273,6 +274,24 @@ th.right,td.right{text-align:right;white-space:nowrap}
 .keyout code{flex:1;background:var(--bg);border-radius:6px;padding:10px 12px;word-break:break-all}
 .key-warning{color:var(--muted);font-size:13px;line-height:1.5}
 
+/* docs */
+.doc-item{display:block;padding:14px 2px;border-top:1px solid var(--faint-2)}
+.doc-item:hover{text-decoration:none}
+.doc-t{display:block;font-weight:700;color:var(--fg)}
+.doc-item:hover .doc-t{color:var(--accent)}
+.doc-d{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.doc h2{font-size:15px;font-weight:700;margin:34px 0 10px}
+.doc h2:first-child{margin-top:0}
+.doc p{margin-bottom:14px}
+.doc ul{margin:0 0 18px 18px;padding:0}
+.doc li{margin-bottom:6px}
+.doc pre{background:var(--faint);border-radius:8px;padding:14px 16px;margin-bottom:18px;overflow-x:auto;font-size:12.5px}
+.doc .table-wrap{margin-bottom:20px}
+.doc td{font-size:12.5px}
+.doc p code,.doc li code,.doc td code{background:var(--faint);border-radius:4px;padding:1px 5px;overflow-wrap:anywhere}
+.doc pre code{background:none;padding:0}
+.doc-next{display:flex;justify-content:space-between;gap:16px;margin-top:40px;padding-top:16px;border-top:1px solid var(--faint-2);font-size:13px}
+
 /* empty */
 .empty{color:var(--muted);padding:48px 12px;text-align:center}
 .empty .empty-t{color:var(--fg);font-weight:700;margin-bottom:4px}
@@ -447,6 +466,7 @@ function topBar(user: AuthUser | null | undefined): string {
   return `<div class="top">
     <a class="brand" href="/dashboard">Waka</a>
     <div class="top-right">
+      <a href="/ui/docs">docs</a>
       <span>${esc(user.email)}</span>
       <form class="inline-form" method="post" action="/logout" hx-confirm="Sign out?">
         <button type="submit" class="signout">sign out</button>
@@ -1289,4 +1309,56 @@ export async function uiDeleteDomainKey(req: Req): Promise<Response> {
     return seeOther(`/ui/domains/${domain.id}/keys?m=revoke-failed`);
   }
   return seeOther(`/ui/domains/${domain.id}/keys?m=revoked`);
+}
+
+// --- docs --------------------------------------------------------------------
+
+function docsCrumbs(page?: string): string {
+  const home = { label: "domains", href: "/dashboard" };
+  return crumbs(
+    page
+      ? [home, { label: "docs", href: "/ui/docs" }, { label: page }]
+      : [home, { label: "docs" }],
+  );
+}
+
+function docsIndexView(): string {
+  const items = DOC_TOPICS.map(
+    (topic) => `<a class="doc-item" href="/ui/docs/${topic.slug}">
+      <span class="doc-t">${esc(topic.title)}</span>
+      <span class="doc-d">${esc(topic.summary)}</span>
+    </a>`
+  ).join("");
+  return `${docsCrumbs()}
+    <h1>Docs</h1>
+    <p class="lede">How to send email from your domains, and what every answer from the API means.</p>
+    ${items}`;
+}
+
+export function uiDocs(req: Req): Response {
+  const user = gate(req);
+  if (user instanceof Response) return user;
+  return renderPage(req, "docs", docsIndexView(), user);
+}
+
+export function uiDocsTopic(req: Req): Response {
+  const user = gate(req);
+  if (user instanceof Response) return user;
+  const topic = findDocTopic(req.params.topic ?? "");
+  if (!topic) {
+    const body = `${docsCrumbs("not found")}${alert("err", "That page does not exist. Open the docs index and pick a topic.")}`;
+    return renderPage(req, "Not found", body, user, { status: 404 });
+  }
+  const position = DOC_TOPICS.indexOf(topic);
+  const previous = DOC_TOPICS[position - 1];
+  const next = DOC_TOPICS[position + 1];
+  const body = `${docsCrumbs(topic.title.toLowerCase())}
+    <h1>${esc(topic.title)}</h1>
+    <p class="lede">${esc(topic.summary)}</p>
+    <div class="doc">${topic.body}</div>
+    <div class="doc-next">
+      ${previous ? `<a href="/ui/docs/${previous.slug}">back: ${esc(previous.title.toLowerCase())}</a>` : `<a href="/ui/docs">all topics</a>`}
+      ${next ? `<a href="/ui/docs/${next.slug}">next: ${esc(next.title.toLowerCase())}</a>` : ""}
+    </div>`;
+  return renderPage(req, topic.title.toLowerCase(), body, user);
 }
