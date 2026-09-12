@@ -92,3 +92,10 @@ test("keeps regions aligned after characters that grow when lowercased", () => {
     "İİİİ\n\nvisible",
   );
 });
+
+test("does not open a region at a stray closing tag", () => {
+  expect(htmlToText("</script>shown</script><p>y</p>")).toBe("shown\ny");
+  expect(htmlToText('</a>stray</a> <a href="https://x.example/">link</a>')).toBe(
+    "stray link (https://x.example/)",
+  );
+});
