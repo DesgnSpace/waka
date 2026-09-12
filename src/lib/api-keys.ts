@@ -1,5 +1,4 @@
 import { customAlphabet } from "nanoid";
-import bcrypt from "bcryptjs";
 import { query } from "./database";
 import type { ApiKey, DbRow } from "./database";
 import { errorMessage } from "./errors";
@@ -82,7 +81,7 @@ export async function generateApiKey(
   )();
   const apiKey = `wka_${keyId}_${keySecret}`; // wka = Waka
 
-  const keyHash = await bcrypt.hash(apiKey, 10);
+  const keyHash = await Bun.password.hash(apiKey, { algorithm: "bcrypt", cost: 10 });
 
   const sanitized = sanitizePermissions(permissions);
   const finalPermissions = sanitized.length ? sanitized : ["send"];
@@ -154,7 +153,7 @@ export async function verifyApiKey(
   );
 
   for (const key of result.rows) {
-    const isValid = await bcrypt.compare(apiKey, key.key_hash);
+    const isValid = await Bun.password.verify(apiKey, key.key_hash);
     if (isValid) {
       const expiresAt = key.expires_at;
       if (expiresAt && new Date(expiresAt).getTime() <= Date.now()) {
