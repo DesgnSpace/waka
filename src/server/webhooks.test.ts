@@ -209,3 +209,22 @@ t("a rejection is superseded by later delivery evidence", async () => {
   await processSESEvent(sesMessage(SES_ID_2, "delivery"), "sns-delivery-2");
   expect(await logStatus(log2Id)).toBe("delivered");
 });
+
+t("a rejection replaces a prior send", async () => {
+  const sesId = "0f9d2e6b-a1c1-4f3e-9d5f-000000000003";
+  const inserted = await db.query<{ id: string }>(
+    `INSERT INTO email_logs (domain_id, from_email, to_emails, ses_message_id)
+     VALUES ($1, 'noreply@example.com', '["reader@example.com"]', $2) RETURNING id`,
+    [domainId, sesId],
+  );
+  const logId = inserted.rows[0].id;
+
+  await processSESEvent(sesMessage(sesId, "send"), "sns-send-reject-seq-1");
+  expect(await logStatus(logId)).toBe("sent");
+
+  await processSESEvent(sesMessage(sesId, "reject"), "sns-reject-after-send-1");
+  expect(await logStatus(logId)).toBe("failed");
+
+  await processSESEvent(sesMessage(sesId, "delivery"), "sns-delivery-after-reject-1");
+  expect(await logStatus(logId)).toBe("delivered");
+});
