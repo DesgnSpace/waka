@@ -27,6 +27,7 @@ import { query } from "@/lib/database";
 import { buildEmailLogsWhere, normalizeLogsFilters, toRangeEnd, toRangeStart, type EmailLogsFilters } from "@/lib/email-logs";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 import { reserveDailySend } from "@/lib/quotas";
+import { isEmailAddress } from "@/lib/email";
 import { DOC_TOPICS, findDocTopic } from "./docs";
 
 // --- helpers -----------------------------------------------------------------
@@ -1126,7 +1127,7 @@ function domainKeysView(
 }
 
 async function sendTestEmail(req: Req, domain: DomainRow, recipient: string, user: AuthUser): Promise<Response> {
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+  if (!isEmailAddress(recipient)) {
     return seeOther(`/ui/domains/${domain.id}?m=test-recipient`);
   }
   if (domain.status !== "verified") return seeOther(`/ui/domains/${domain.id}?m=test-pending`);

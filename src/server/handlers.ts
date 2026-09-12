@@ -39,6 +39,7 @@ import {
 import { parseJsonArray, parseJsonObject } from "@/lib/serialization";
 import { findSuppressed, listSuppressions, removeSuppression } from "@/lib/suppression";
 import { normalizeLogsFilters, searchEmailLogs, toRangeEnd, toRangeStart } from "@/lib/email-logs";
+import { isEmailAddress } from "@/lib/email";
 
 type DomainIdRow = DbRow<{ id: string }>;
 type EmailLogRow = DbRow<{
@@ -212,7 +213,7 @@ export async function removeSuppressionHandler(req: Req): Promise<Response> {
   if (!domain) return json({ error: "Domain not found" }, 404);
   const raw = req.params.email ? decodeURIComponent(req.params.email) : "";
   const email = raw.trim().toLowerCase();
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!isEmailAddress(email)) {
     return json({ error: "Provide a valid email address." }, 400);
   }
   const removed = await removeSuppression(domainId, email);
@@ -364,7 +365,7 @@ const addressField = z
   .string()
   .max(320)
   .refine((v) => !/[\r\n]/.test(v), "Invalid email address")
-  .refine((v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(bareAddress(v)), "Invalid email address");
+  .refine((v) => isEmailAddress(bareAddress(v)), "Invalid email address");
 const asArray = (v: unknown) => (typeof v === "string" ? [v] : v);
 
 const sendEmailSchema = z
