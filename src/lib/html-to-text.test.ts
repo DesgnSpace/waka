@@ -59,3 +59,11 @@ test("returns empty output for empty and non-textual bodies", () => {
     htmlToText('<img src="https://t.example/open?id=1" width="1" height="1" alt="">'),
   ).toBe("");
 });
+
+test("stays linear on documents full of unclosed tags", () => {
+  for (const opener of ['<a href="https://example.com/x">', "<script>x", "<!-- x", "<p"]) {
+    const started = Bun.nanoseconds();
+    htmlToText(opener.repeat(200_000));
+    expect((Bun.nanoseconds() - started) / 1e6).toBeLessThan(1000);
+  }
+});

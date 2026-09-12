@@ -84,15 +84,23 @@ function proxyTrusted(): boolean {
   return TRUST_PROXY_VALUES.has((process.env.TRUST_PROXY ?? "").trim().toLowerCase());
 }
 
-function firstForwardedValue(value: string): string {
-  return value.split(",")[0].trim();
+// Proxies append to X-Forwarded-For, so only the last entry was written by the
+// trusted hop; everything to its left is supplied by the client.
+function lastForwardedValue(value: string): string {
+  const entries = value.split(",");
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index].trim();
+    if (entry) return entry;
+  }
+  return "";
 }
 
 export function requestAddress(req: Request): string {
   if (proxyTrusted()) {
     const forwarded = req.headers.get("x-forwarded-for");
-    const client = forwarded ? firstForwardedValue(forwarded) : "";
-    const address = client || req.headers.get("x-real-ip")?.trim() || peerAddress(req) || "unknown";
+    const proxyClient = forwarded ? lastForwardedValue(forwarded) : "";
+    const address =
+      req.headers.get("x-real-ip")?.trim() || proxyClient || peerAddress(req) || "unknown";
     return address.slice(0, 128);
   }
   return (peerAddress(req) || "unknown").slice(0, 128);
