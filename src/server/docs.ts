@@ -68,7 +68,7 @@ const quickstart = [
   section(
     "4. Create an API key",
     p(
-      "On the domain's <strong>API keys</strong> tab, name a key and create it. The full key is shown once — copy it into your application's secret store before you leave the page. You can only see its first characters afterwards.",
+      "On the domain's <strong>API keys</strong> page, name a key and create it. The full key is shown once — copy it into your application's secret store before you leave the page. You can only see its first characters afterwards.",
     ),
     p(
       "You can cap a key to a number of messages per minute and per day when you create it, and change or clear those caps later.",
@@ -93,7 +93,7 @@ const quickstart = [
   "created_at": "2026-09-12T10:04:11.512Z"
 }`),
     p(
-      "The domain's <strong>Email activity</strong> tab shows the message and every delivery update that follows it.",
+      "The domain's <strong>Email activity</strong> page shows the message and every delivery update that follows it.",
     ),
   ),
   section(
@@ -620,7 +620,7 @@ const logs = [
   section(
     "In the dashboard",
     p(
-      "A domain's <strong>Email activity</strong> tab searches the same way — recipient, subject, date range, message id, delivery status — and shows how many times each message was opened and clicked.",
+      "A domain's <strong>Email activity</strong> page searches the same way — recipient, subject, date range, message id, delivery status — and shows how many times each message was opened and clicked.",
     ),
   ),
 ].join("");
@@ -721,7 +721,7 @@ const usage = [
 
 const apiKeys = [
   p(
-    "Keys are created per domain, and a key can only send from that domain. Manage them in the dashboard, on a domain's <strong>API keys</strong> tab, or over the API with your sign-in token.",
+    "Keys are created per domain, and a key can only send from that domain. Manage them in the dashboard, on a domain's <strong>API keys</strong> page, or over the API with your sign-in token.",
   ),
   section(
     "Create a key",
