@@ -55,10 +55,6 @@ for (const suffix of NON_PUBLIC_DOMAIN_SUFFIXES) {
   });
 }
 
-test("dns checker rejects numeric labels", async () => {
-  await expectValidationError("mail.123.example.com");
-});
-
 test("dns checker rejects single-label names", async () => {
   await expectValidationError("foo");
 });

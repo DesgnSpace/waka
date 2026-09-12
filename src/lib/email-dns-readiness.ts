@@ -79,14 +79,12 @@ export function normalizeDomain(input: string): string {
   const labels = withoutPort.split(".");
   const lastLabel = labels[labels.length - 1];
   const isIpLiteral = isIP(stripped) !== 0 || isIP(withoutPort) !== 0;
-  const hasNumericLabel = labels.some((label) => /^\d+$/.test(label));
 
   if (
     withoutPort.length < 4 ||
     withoutPort.length > 253 ||
     labels.length < 2 ||
     isIpLiteral ||
-    hasNumericLabel ||
     NON_PUBLIC_DOMAIN_SUFFIXES.includes(lastLabel)
   ) {
     throw new Error("Enter a public domain such as example.com.");
