@@ -201,8 +201,7 @@ code,.doc pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;f
 .auth{min-height:100vh;padding:48px 40px 96px}
 .brand{font-size:16px;font-weight:600;color:var(--fg)}
 .brand:hover{text-decoration:none}
-.menu{display:flex;flex:1;min-height:0}
-.menu summary{display:none}
+.menu{display:none}
 .menu-panel{display:flex;flex:1;min-height:0;flex-direction:column;gap:32px}
 .side nav{display:flex;flex-direction:column;gap:24px}
 .side-section{display:grid;gap:4px}
@@ -420,13 +419,13 @@ th.right,td.right{text-align:right;white-space:nowrap}
 
 @media (max-width:900px){
   .app{grid-template-columns:1fr}
-  .side{position:static;height:auto;overflow:visible;border-right:0;border-bottom:1px solid var(--line);padding:16px 20px;flex-direction:row;align-items:center;justify-content:space-between}
-  .menu{display:block;position:relative;flex:0 0 auto;min-height:auto}
-  .menu summary{display:block;order:2;margin-left:auto;padding:8px 12px;border:0;border-radius:6px;background:var(--hover);color:var(--fg);font-size:14px;font-weight:500;line-height:1.4;list-style:none;cursor:pointer}
+  .side{position:relative;height:auto;overflow:visible;border-right:0;border-bottom:1px solid var(--line);padding:16px 20px;flex-direction:row;align-items:center;justify-content:space-between}
+  .menu{display:block;flex:0 0 auto}
+  .menu summary{padding:8px 12px;border-radius:6px;background:var(--hover);color:var(--fg);font-size:14px;font-weight:500;line-height:1.4;list-style:none;cursor:pointer}
   .menu summary:hover{background:var(--pressed)}
   .menu summary::-webkit-details-marker{display:none}
-  .menu-panel{display:none;position:absolute;z-index:10;top:calc(100% + 16px);left:calc(100% + 20px - 100vw);right:-20px;min-height:auto;max-height:calc(100vh - 68px);overflow-y:auto;padding:16px 20px 24px;background:var(--bg);border-bottom:1px solid var(--line);gap:24px}
-  .menu[open]>.menu-panel{display:flex}
+  .menu-panel{display:none;position:absolute;z-index:10;top:100%;left:0;right:0;min-height:auto;max-height:calc(100vh - 68px);overflow-y:auto;padding:16px 20px 24px;background:var(--bg);border-bottom:1px solid var(--line);gap:24px}
+  .side:has(.menu[open]) .menu-panel{display:flex}
   .side nav{gap:20px}
   .side-account{margin-top:0}
 }
@@ -623,25 +622,25 @@ function sidebar(user: AuthUser, url: string, domains: SidebarDomain[]): string 
     <a class="brand" href="/dashboard">Waka</a>
     <details class="menu">
       <summary>Menu</summary>
-      <div class="menu-panel">
-        <nav aria-label="Main">
-          <div class="side-section">
-            ${sidebarLink("Domains", "/dashboard", state.primary === "domains", "side-section-label")}
-            <div class="side-list">${domainLinks}${allDomains}</div>
-          </div>
-          <div class="side-section">
-            ${sidebarLink("Docs", "/ui/docs", state.primary === "docs", "side-section-label")}
-            <div class="side-list">${topicLinks}</div>
-          </div>
-        </nav>
-        <div class="side-account">
-          <span class="side-account-email">${esc(user.email)}</span>
-          <form class="inline-form" method="post" action="/logout" hx-confirm="Sign out?">
-            <button type="submit" class="signout">Sign out</button>
-          </form>
-        </div>
-      </div>
     </details>
+    <div class="menu-panel">
+      <nav aria-label="Main">
+        <div class="side-section">
+          ${sidebarLink("Domains", "/dashboard", state.primary === "domains", "side-section-label")}
+          <div class="side-list">${domainLinks}${allDomains}</div>
+        </div>
+        <div class="side-section">
+          ${sidebarLink("Docs", "/ui/docs", state.primary === "docs", "side-section-label")}
+          <div class="side-list">${topicLinks}</div>
+        </div>
+      </nav>
+      <div class="side-account">
+        <span class="side-account-email">${esc(user.email)}</span>
+        <form class="inline-form" method="post" action="/logout" hx-confirm="Sign out?">
+          <button type="submit" class="signout">Sign out</button>
+        </form>
+      </div>
+    </div>
   </aside>`;
 }
 
