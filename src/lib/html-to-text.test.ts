@@ -59,3 +59,43 @@ test("returns empty output for empty and non-textual bodies", () => {
     htmlToText('<img src="https://t.example/open?id=1" width="1" height="1" alt="">'),
   ).toBe("");
 });
+
+test("stays linear on documents full of unclosed tags", () => {
+  const openers = [
+    '<a href="https://example.com/x">',
+    "<script>x",
+    "<!-- x",
+    "<p",
+    "<a href ",
+    "<script ",
+    "<style ",
+    "<img ",
+    "<td ",
+  ];
+  for (const opener of openers) {
+    const started = Bun.nanoseconds();
+    htmlToText(opener.repeat(200_000));
+    expect((Bun.nanoseconds() - started) / 1e6).toBeLessThan(1000);
+  }
+
+  const mixed = openers.join("").repeat(200_000 / openers.length);
+  const started = Bun.nanoseconds();
+  htmlToText(mixed);
+  expect((Bun.nanoseconds() - started) / 1e6).toBeLessThan(1000);
+});
+
+test("keeps regions aligned after characters that grow when lowercased", () => {
+  expect(
+    htmlToText('<p>İstanbul</p><a href="https://x.example/">link</a><p>after</p>'),
+  ).toBe("İstanbul\nlink (https://x.example/)\nafter");
+  expect(htmlToText("<p>İİİİ</p><script>alert(1)</script><p>visible</p>")).toBe(
+    "İİİİ\n\nvisible",
+  );
+});
+
+test("does not open a region at a stray closing tag", () => {
+  expect(htmlToText("</script>shown</script><p>y</p>")).toBe("shown\ny");
+  expect(htmlToText('</a>stray</a> <a href="https://x.example/">link</a>')).toBe(
+    "stray link (https://x.example/)",
+  );
+});

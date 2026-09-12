@@ -38,22 +38,36 @@ test("accepts canonical TRUST_PROXY values", () => {
   }
 });
 
-test("takes the leftmost entry of a forwarded chain when trusted", () => {
+test("takes the rightmost entry of a forwarded chain when trusted", () => {
   process.env.TRUST_PROXY = "true";
   const request = req({ "x-forwarded-for": "203.0.113.7, 70.41.3.18, 150.172.238.178" });
-  expect(requestAddress(request)).toBe("203.0.113.7");
+  expect(requestAddress(request)).toBe("150.172.238.178");
 });
 
-test("trims whitespace around the client entry", () => {
-  process.env.TRUST_PROXY = "yes";
-  expect(requestAddress(req({ "x-forwarded-for": "  203.0.113.7 ,70.41.3.18" }))).toBe(
+test("ignores a forwarded entry the client put in front of the proxy entry", () => {
+  process.env.TRUST_PROXY = "true";
+  expect(requestAddress(req({ "x-forwarded-for": "1.2.3.4, 203.0.113.7" }))).toBe(
     "203.0.113.7",
   );
 });
 
-test("falls back to x-real-ip when trusted and x-forwarded-for is absent", () => {
+test("trims whitespace around the proxy entry", () => {
+  process.env.TRUST_PROXY = "yes";
+  expect(requestAddress(req({ "x-forwarded-for": "70.41.3.18, 203.0.113.7 , " }))).toBe(
+    "203.0.113.7",
+  );
+});
+
+test("prefers x-real-ip over a spoofed forwarded chain when trusted", () => {
   process.env.TRUST_PROXY = "1";
-  expect(requestAddress(req({ "x-real-ip": "198.51.100.2" }))).toBe("198.51.100.2");
+  expect(
+    requestAddress(req({ "x-forwarded-for": "1.2.3.4, 5.6.7.8", "x-real-ip": "198.51.100.2" })),
+  ).toBe("198.51.100.2");
+});
+
+test("falls back to x-forwarded-for when trusted and x-real-ip is absent", () => {
+  process.env.TRUST_PROXY = "1";
+  expect(requestAddress(req({ "x-forwarded-for": "198.51.100.2" }))).toBe("198.51.100.2");
 });
 
 test("skips an empty forwarded chain and falls back further", () => {
