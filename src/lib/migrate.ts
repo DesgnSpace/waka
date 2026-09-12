@@ -6,6 +6,8 @@ const MIGRATIONS_DIR = path.join(import.meta.dir, "../../migrations");
 
 // App-wide advisory lock so concurrent containers (rolling deploys) never run
 // migrations simultaneously; the second waits, then sees everything applied.
+// Advisory lock keys in use: 724242 migrate, 724243 prune, 724244 outbound
+// webhooks, 724245 rate-limit purge.
 const MIGRATION_LOCK_KEY = 724_242;
 
 export async function migrate(): Promise<void> {

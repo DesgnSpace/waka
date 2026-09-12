@@ -30,8 +30,6 @@ mock.module("@/lib/api-keys", () => ({
   generateApiKey: async () => { throw new Error("not used"); },
   getUserApiKeys: async () => [],
   deleteApiKey: async () => {},
-  updateApiKeyLimits: async () => {},
-  updateApiKeyPermissions: async () => {},
 }));
 
 installFakeDatabase("@/lib/database");

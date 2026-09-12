@@ -48,8 +48,6 @@ mock.module("@/lib/api-keys", () => ({
   generateApiKey: async () => { throw new Error("not used"); },
   getUserApiKeys: async () => [],
   deleteApiKey: async () => {},
-  updateApiKeyPermissions: async () => {},
-  updateApiKeyLimits: async () => {},
 }));
 const sendEmail = mock(async () => "ses-msg-id");
 mock.module("@/lib/ses", () => ({

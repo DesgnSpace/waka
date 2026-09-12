@@ -35,7 +35,6 @@ mock.module("@/lib/api-keys", () => ({
   generateApiKey: async () => { throw new Error("not used"); },
   getUserApiKeys: async () => [],
   deleteApiKey: async () => {},
-  updateApiKeyPermissions: async () => {},
 }));
 const unused = async () => { throw new Error("not used"); };
 mock.module("@/lib/ses", () => ({

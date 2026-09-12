@@ -22,6 +22,7 @@ const {
   generateWebhookSecret,
   shouldRetryWebhookStatus,
   isPrivateIP,
+  isDeliveryUrlBlocked,
 } = await import("./outbound-webhooks");
 
 test("signed string is timestamp dot raw body", () => {
@@ -273,6 +274,36 @@ test("isPrivateIP identifies private ranges", () => {
   expect(isPrivateIP("::1")).toBe(true);
   expect(isPrivateIP("8.8.8.8")).toBe(false);
   expect(isPrivateIP("1.1.1.1")).toBe(false);
+});
+
+const MAPPED_AND_RESERVED_URLS = [
+  "https://[::ffff:169.254.169.254]/",
+  "https://[::ffff:7f00:1]/",
+  "https://[::ffff:127.0.0.1]/",
+  "https://[::]/",
+  "https://[::1]/",
+  "https://224.0.0.1/",
+  "https://255.255.255.255/",
+  "https://0.0.0.0/",
+  "https://[fe80::1]/",
+  "https://[fd00::1]/",
+];
+
+test("isValidWebhookUrl rejects mapped, unspecified, multicast and reserved forms", () => {
+  for (const url of MAPPED_AND_RESERVED_URLS) {
+    expect(isValidWebhookUrl(url)).toBe(false);
+  }
+  expect(isValidWebhookUrl("https://example.com/")).toBe(true);
+});
+
+test("the delivery guard rejects the same mapped, unspecified, multicast and reserved forms", async () => {
+  for (const url of MAPPED_AND_RESERVED_URLS) {
+    expect(await isDeliveryUrlBlocked(url)).toBe(true);
+  }
+});
+
+test("the delivery guard blocks a host that fails to resolve", async () => {
+  expect(await isDeliveryUrlBlocked("https://waka-outbound-guard.invalid/hook")).toBe(true);
 });
 
 test("createWebhookEndpoint rejects private URL", async () => {
