@@ -47,7 +47,7 @@ const quickstart = [
   section(
     "1. Add your domain",
     p(
-      'Open <a href="/dashboard">domains</a>, type the domain you want to send from — <code>example.com</code>, not <code>you@example.com</code> — and add it.',
+      'Open <a href="/dashboard">Domains</a>, type the domain you want to send from — <code>example.com</code>, not <code>you@example.com</code> — and add it.',
     ),
   ),
   section(
@@ -62,13 +62,13 @@ const quickstart = [
   section(
     "3. Check DNS",
     p(
-      'DNS changes take a few minutes to a few hours to appear. Press <strong>check DNS</strong> on the domain page until the status reads <span class="status-badge status-verified"><span class="status-mark" aria-hidden="true"></span>verified</span>. Until then the domain cannot send.',
+      'DNS changes take a few minutes to a few hours to appear. Press <strong>Check DNS</strong> on the domain page until the status reads <span class="status-badge status-verified"><span class="status-mark" aria-hidden="true"></span>Verified</span>. Until then the domain cannot send.',
     ),
   ),
   section(
     "4. Create an API key",
     p(
-      "On the domain's <strong>api keys</strong> tab, name a key and create it. The full key is shown once — copy it into your application's secret store before you leave the page. You can only see its first characters afterwards.",
+      "On the domain's <strong>API keys</strong> tab, name a key and create it. The full key is shown once — copy it into your application's secret store before you leave the page. You can only see its first characters afterwards.",
     ),
     p(
       "You can cap a key to a number of messages per minute and per day when you create it, and change or clear those caps later.",
@@ -93,7 +93,7 @@ const quickstart = [
   "created_at": "2026-09-12T10:04:11.512Z"
 }`),
     p(
-      "The domain's <strong>email activity</strong> tab shows the message and every delivery update that follows it.",
+      "The domain's <strong>Email activity</strong> tab shows the message and every delivery update that follows it.",
     ),
   ),
   section(
@@ -303,8 +303,8 @@ const sendEmail = [
     list([
       "The furthest you can schedule is 72 hours ahead. Further than that is refused with <code>422 scheduled_at can be at most 72 hours in the future.</code>",
       "A time already past simply sends straight away.",
-      "You get the message id immediately. Until its time arrives it reads as <strong>scheduled</strong> in email activity.",
-      "A worker picks the message up within a minute of its time. If sending fails it tries again 5 minutes later, up to 5 attempts in all, and then stops as <strong>failed</strong>.",
+      "You get the message id immediately. Until its time arrives it reads as <strong>Scheduled</strong> in email activity.",
+      "A worker picks the message up within a minute of its time. If sending fails it tries again 5 minutes later, up to 5 attempts in all, and then stops as <strong>Failed</strong>.",
       "Daily allowance is counted when you submit the message, not when it leaves.",
     ]),
   ),
@@ -620,7 +620,7 @@ const logs = [
   section(
     "In the dashboard",
     p(
-      "A domain's <strong>email activity</strong> tab searches the same way — recipient, subject, date range, message id, delivery status — and shows how many times each message was opened and clicked.",
+      "A domain's <strong>Email activity</strong> tab searches the same way — recipient, subject, date range, message id, delivery status — and shows how many times each message was opened and clicked.",
     ),
   ),
 ].join("");
@@ -721,7 +721,7 @@ const usage = [
 
 const apiKeys = [
   p(
-    "Keys are created per domain, and a key can only send from that domain. Manage them in the dashboard, on a domain's <strong>api keys</strong> tab, or over the API with your sign-in token.",
+    "Keys are created per domain, and a key can only send from that domain. Manage them in the dashboard, on a domain's <strong>API keys</strong> tab, or over the API with your sign-in token.",
   ),
   section(
     "Create a key",
@@ -779,7 +779,7 @@ const apiKeys = [
   section(
     "Expiry",
     p(
-      "An expired key is refused with <code>401 This API key has expired. Create a new API key for this domain to continue.</code> The dashboard marks it <strong>expired</strong> in the key list, and you can set or change an expiry date there without creating a new key.",
+      "An expired key is refused with <code>401 This API key has expired. Create a new API key for this domain to continue.</code> The dashboard marks it <strong>Expired</strong> in the key list, and you can set or change an expiry date there without creating a new key.",
     ),
   ),
 ].join("");
@@ -822,7 +822,7 @@ const domains = [
     code(`curl -X POST ${HOST}/api/domains/<domain-id>/verify \\
   -H "Authorization: Bearer <token>"`),
     p(
-      "Or press <strong>check DNS</strong> on the domain page. A domain reads <strong>waiting for DNS</strong> until every record is found, <strong>verified</strong> when it is ready to send, and <strong>needs attention</strong> when a record is present but does not match.",
+      "Or press <strong>Check DNS</strong> on the domain page. A domain reads <strong>Waiting for DNS</strong> until every record is found, <strong>Verified</strong> when it is ready to send, and <strong>Needs attention</strong> when a record is present but does not match.",
     ),
   ),
   section(

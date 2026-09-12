@@ -155,10 +155,6 @@ const STYLE = `
 :root{
   --bg:#fff;
   --fg:#000;
-  --muted:rgb(0 0 0 / 64%);
-  --faint:rgb(0 0 0 / 4%);
-  --faint-2:rgb(0 0 0 / 9%);
-  --accent:#000;
   --danger:#b42318;
   --ok:#1a7f4b;
   --warn:#9a6700;
@@ -167,6 +163,7 @@ const STYLE = `
   --line:rgb(0 0 0 / 10%);
   --line-strong:rgb(0 0 0 / 18%);
   --hover:rgb(0 0 0 / 5%);
+  --pressed:rgb(0 0 0 / 9%);
   --surface:rgb(0 0 0 / 4%);
 }
 *{box-sizing:border-box;margin:0}
@@ -180,11 +177,11 @@ body{
 a{color:var(--fg);text-decoration:none}
 a:hover{text-decoration:underline}
 :focus-visible{outline:2px solid var(--fg);outline-offset:2px}
-code,.copy-value,.keyout code,.doc pre,.key-prefix{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+code,.doc pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
 
 .app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
 .side{position:sticky;top:0;height:100vh;overflow-y:auto;padding:24px 16px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:32px}
-.main{padding:40px 48px 96px;max-width:960px;min-width:0}
+.main{padding:48px 40px 96px;max-width:920px;min-width:0}
 .auth{min-height:100vh;padding:48px 40px 96px}
 .brand{font-size:16px;font-weight:600;color:var(--fg)}
 .brand:hover{text-decoration:none}
@@ -196,7 +193,7 @@ code,.copy-value,.keyout code,.doc pre,.key-prefix{font-family:ui-monospace,SFMo
 .side-section-label,.side-link{display:block;padding:8px 12px;border-radius:6px;text-decoration:none}
 .side-section-label{color:var(--ink-3);font-size:13px;font-weight:500}
 .side-section-label:hover,.side-link:hover{background:var(--hover);color:var(--fg);text-decoration:none}
-.side-section-label.active,.side-link.active{background:rgb(0 0 0 / 6%);color:var(--fg);text-decoration:none}
+.side-section-label.active,.side-link.active{background:var(--pressed);color:var(--fg);text-decoration:none}
 .side-list{display:grid}
 .side-link{min-width:0;color:var(--ink-2);font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .side-subnav{display:grid;margin-left:12px}
@@ -223,7 +220,7 @@ input,select,textarea{
   border:1px solid var(--line-strong);border-radius:6px;padding:10px 12px;
 }
 input::placeholder,textarea::placeholder{color:var(--ink-2)}
-input:focus,select:focus,textarea:focus{outline:2px solid var(--fg);outline-offset:0}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--fg);outline-offset:2px}
 
 /* buttons */
 button,.btn{font:inherit;cursor:pointer}
@@ -233,21 +230,20 @@ button,.btn{font:inherit;cursor:pointer}
 }
 .btn:hover{text-decoration:none}
 .btn-quiet{background:var(--hover);color:var(--fg)}
-.btn-quiet:hover{background:var(--faint-2)}
+.btn-quiet:hover{background:var(--pressed)}
 .btn-sm{padding:6px 12px;min-height:32px;font-size:13px}
 .btn-danger{background:var(--hover);color:var(--danger)}
 .btn-danger:hover{background:var(--danger);color:#fff}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .btn-block{width:100%}
-.act,.signout{display:inline-flex;align-items:center;background:none;border:0;color:var(--fg);padding:5px 8px;font:500 13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;border-radius:4px;text-decoration:none}
+.act,.signout{display:inline-flex;align-items:center;background:none;border:0;color:var(--fg);padding:5px 8px;font:500 13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;border-radius:6px;text-decoration:none}
 .act:hover{text-decoration:underline}
 .act.danger{color:var(--danger)}
 .act.danger:hover{background:var(--danger);color:#fff;text-decoration:none}
-.signout:hover{color:var(--fg);text-decoration:underline}
 .inline-form{display:inline}
 .btn[aria-busy="true"],.act[aria-busy="true"]{cursor:wait}
 .btn-xs{padding:5px 12px;min-height:30px;font-size:13px}
-.btn-text{display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:5px 8px;background:none;border:0;border-radius:4px;color:var(--fg);font:500 13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;cursor:pointer}
+.btn-text{display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:5px 8px;background:none;border:0;border-radius:6px;color:var(--fg);font:500 13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;cursor:pointer}
 .btn-text:hover{background:var(--hover)}
 
 /* toolbar */
@@ -260,17 +256,15 @@ button,.btn{font:inherit;cursor:pointer}
 table{width:100%;border-collapse:collapse}
 .table-wrap{overflow-x:auto}
 th{
-  text-align:left;color:var(--ink-2);font-size:13px;font-weight:500;letter-spacing:normal;padding:0 12px 10px;border-bottom:1px solid var(--line);
+  text-align:left;color:var(--ink-2);font-size:13px;font-weight:500;padding:0 12px 10px;border-bottom:1px solid var(--line);
 }
-td{padding:12px;vertical-align:top;border-top:1px solid rgb(0 0 0 / 8%)}
+td{font-size:14px;padding:12px;vertical-align:top;border-top:1px solid var(--line)}
 tbody tr:first-child td{border-top:0}
 tbody tr:hover td{background:var(--hover)}
 th.right,td.right{text-align:right;white-space:nowrap}
 .t-name{font-weight:500;color:var(--fg)}
-.t-name:hover{color:var(--fg)}
 .t-sub{display:block;color:var(--ink-3);font-size:13px;margin-top:2px}
 .t-mut{color:var(--ink-3)}
-.logs td{font-size:14px}
 .logs .sent{white-space:nowrap}
 .result-count{color:var(--ink-2);font-size:14px;margin:0 0 12px}
 
@@ -280,25 +274,20 @@ th.right,td.right{text-align:right;white-space:nowrap}
 .status-verified,.status-delivered{color:var(--ok)}
 .status-pending,.status-sent,.status-scheduled,.status-sending{color:var(--warn)}
 .status-failed,.status-bounced,.status-complained{color:var(--danger)}
-.status-unknown{color:var(--muted)}
+.status-unknown{color:var(--ink-2)}
 
 /* alerts */
-.alert{padding:12px 14px;border-radius:6px;margin-bottom:20px;font-size:14px;background:var(--surface);color:var(--fg)}
+.alert{padding:12px 14px;border-radius:8px;margin-bottom:20px;font-size:14px;background:var(--surface);color:var(--fg)}
 .alert.ok{color:var(--ok)}
 .alert.err{color:var(--danger)}
 .alert.mut{color:var(--ink-2)}
 
 /* setup, dns, and key blocks */
-.block{margin-bottom:48px}
-.block-title{font-size:17px;line-height:1.25;font-weight:600;margin-bottom:12px}
-.block code{word-break:break-all;color:var(--fg)}
 .chapter{margin-top:48px}
 .chapter-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:12px}
 .chapter-head h2{margin:0}
 .chapter-head .btn{flex:0 0 auto}
-.dns-records{display:block}
-.dns-records + .note{display:block;margin-top:8px}
-.record{display:block}
+.dns-records + .note{margin-top:8px}
 .record + .record{margin-top:24px;padding-top:24px;border-top:1px solid var(--line)}
 .record-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}
 .record-head strong{font-size:13px;font-weight:500}
@@ -309,26 +298,26 @@ th.right,td.right{text-align:right;white-space:nowrap}
 .copy-field .cbtn{margin:0}
 .note{color:var(--ink-3);font-size:13px}
 .key-reveal h2{margin:0 0 12px}
+.key-reveal{background:var(--surface);border-radius:8px;padding:16px}
 .keyout{display:flex;gap:12px;align-items:flex-start}
 .keyout code{flex:1;min-width:0;background:var(--surface);border-radius:8px;padding:12px 14px;overflow-wrap:anywhere}
 .keyout .cbtn{flex:0 0 auto;margin-top:3px}
 .key-warning{color:var(--ink-2);font-size:14px;line-height:1.5;margin-top:8px}
 
 /* docs */
-.doc-item{display:block;padding:16px 0;border-top:1px solid var(--line)}
+.doc-item{display:block;padding:16px 0}
+.doc-item + .doc-item{border-top:1px solid var(--line)}
 .doc-item:hover{text-decoration:none}
-.doc-t{display:block;font-weight:500;color:var(--fg)}
-.doc-item:hover .doc-t{color:var(--fg)}
-.doc-d{display:block;color:var(--ink-3);font-size:13px;margin-top:2px}
-.doc p{margin-bottom:14px}
+.doc-t{display:block;font-size:15px;font-weight:500;color:var(--fg)}
+.doc-d{display:block;color:var(--ink-2);font-size:14px;margin-top:2px}
+.doc h2{font-size:17px;line-height:1.25;font-weight:600;margin:40px 0 12px}
+.doc p{font-size:15px;line-height:1.6;margin-bottom:14px}
 .doc ul{margin:0 0 18px 18px;padding:0}
 .doc li{margin-bottom:6px}
-.doc pre{background:var(--surface);border-radius:8px;padding:14px 16px;margin-bottom:18px;overflow-x:auto;line-height:1.5}
+.doc pre{background:var(--surface);border-radius:8px;padding:14px 16px;margin-bottom:18px;overflow-x:auto;font-size:13px;line-height:1.5}
 .doc .table-wrap{margin-bottom:20px}
-.doc td{font-size:14px}
 .doc p code,.doc li code,.doc td code{background:var(--surface);border-radius:4px;padding:1px 5px;overflow-wrap:anywhere}
-.doc pre code{background:none;padding:0}
-.doc-next{display:flex;justify-content:space-between;gap:16px;margin-top:40px;padding-top:16px;border-top:1px solid var(--line);font-size:13px}
+.doc-next{display:flex;justify-content:space-between;gap:16px;margin-top:40px;padding-top:16px;border-top:1px solid var(--line);font-size:14px;font-weight:500}
 
 /* key forms */
 .form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px 20px}
@@ -341,10 +330,9 @@ th.right,td.right{text-align:right;white-space:nowrap}
 /* empty */
 .empty{color:var(--ink-2);padding:40px 0;text-align:left}
 .empty .empty-t{color:var(--fg);font-weight:500;margin-bottom:4px}
-.empty .btn{margin-top:16px}
 
 /* next step and verification state */
-.state{border-left:3px solid var(--muted);padding:4px 0 4px 16px;margin-bottom:40px}
+.state{border-left:3px solid var(--ink-2);padding:4px 0 4px 16px;margin-bottom:40px}
 .state.pending{border-color:var(--warn)}
 .state.verified{border-color:var(--ok)}
 .state.failed{border-color:var(--danger)}
@@ -360,13 +348,13 @@ th.right,td.right{text-align:right;white-space:nowrap}
 .login .lede{margin-bottom:32px}
 
 /* copy feedback */
-.copy-status{position:fixed;z-index:60;left:50%;bottom:18px;transform:translateX(-50%);padding:9px 13px;border-radius:6px;background:var(--fg);color:var(--bg);font-size:13px;opacity:0;pointer-events:none;transition:opacity .15s ease}
+.copy-status{position:fixed;z-index:60;left:50%;bottom:18px;transform:translateX(-50%);padding:9px 13px;border-radius:8px;background:var(--fg);color:var(--bg);font-size:13px;opacity:0;pointer-events:none;transition:opacity .15s ease}
 .copy-status:not(:empty){opacity:1}
 .copy-status.error{background:var(--danger);color:#fff}
 @media(prefers-reduced-motion:reduce){.copy-status{transition:none}}
 
 /* copy button (the one icon in the app) */
-.cbtn{display:inline-flex;align-items:center;gap:5px;min-height:30px;padding:4px 8px;vertical-align:middle;background:none;border:0;border-radius:4px;color:var(--ink-2);cursor:pointer;font-size:13px}
+.cbtn{display:inline-flex;align-items:center;gap:5px;min-height:30px;padding:4px 8px;vertical-align:middle;background:none;border:0;border-radius:6px;color:var(--ink-2);cursor:pointer;font-size:13px}
 .cbtn svg{width:14px;height:14px}
 .cbtn:hover{color:var(--fg);background:var(--hover)}
 .cbtn.copied{color:var(--fg);animation:copied-pop .9s ease}
@@ -389,22 +377,20 @@ th.right,td.right{text-align:right;white-space:nowrap}
 .key-expiry-form{display:flex;gap:4px;align-items:center}
 .key-expiry-form input{width:140px;padding:6px 8px;font-size:13px}
 
-.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @media (max-width:900px){
   .app{grid-template-columns:1fr}
   .side{position:static;height:auto;overflow:visible;border-right:0;border-bottom:1px solid var(--line);padding:16px 20px;flex-direction:row;align-items:center;justify-content:space-between}
   .menu{display:block;position:relative;flex:0 0 auto;min-height:auto}
   .menu summary{display:block;order:2;margin-left:auto;padding:8px 12px;border:0;border-radius:6px;background:var(--hover);color:var(--fg);font-size:14px;font-weight:500;line-height:1.4;list-style:none;cursor:pointer}
-  .menu summary:hover{background:var(--faint-2)}
+  .menu summary:hover{background:var(--pressed)}
   .menu summary::-webkit-details-marker{display:none}
   .menu-panel{display:none;position:absolute;z-index:10;top:calc(100% + 16px);left:calc(100% + 20px - 100vw);right:-20px;min-height:auto;max-height:calc(100vh - 68px);overflow-y:auto;padding:16px 20px 24px;background:var(--bg);border-bottom:1px solid var(--line);gap:24px}
   .menu[open]>.menu-panel{display:flex}
   .side nav{gap:20px}
   .side-account{margin-top:0}
-  .main{padding:24px 20px 64px}
 }
 @media (max-width:700px){
-  .auth{padding:24px 20px 64px}
+  .main,.auth{padding:24px 20px 64px}
   .toolbar{display:block}
   .toolbar label{margin-bottom:12px}
   .toolbar .btn{width:100%}
@@ -812,8 +798,8 @@ function domainsView(domains: DomainRow[], flash = ""): string {
         </td>
         <td>${verifyStatusTag(d.status)}</td>
         <td class="right">
-          ${d.status !== "verified" ? actionForm(`/ui/domains/${esc(d.id)}/verify`, "Check DNS", "act", `Check whether DNS is ready for ${d.domain}.`) : `<a class="act" href="/ui/domains/${esc(d.id)}/keys">Create key</a>`}
-          ${actionForm(`/ui/domains/${esc(d.id)}/delete`, "Delete", "act danger", `Delete ${d.domain}? This also deletes its API keys and email activity.`)}
+          ${d.status !== "verified" ? actionForm(`/ui/domains/${esc(d.id)}/verify`, "Check DNS", "act", `Check whether DNS is ready for ${d.domain}.`) : `<a class="act" href="/ui/domains/${esc(d.id)}/keys">Create API key</a>`}
+          ${actionForm(`/ui/domains/${esc(d.id)}/delete`, "Delete domain", "act danger", `Delete ${d.domain}? This also deletes its API keys and email activity.`)}
         </td>
       </tr>`
     )
@@ -832,7 +818,7 @@ function domainsView(domains: DomainRow[], flash = ""): string {
 }
 
 function actionForm(action: string, label: string, cls: string, confirm: string): string {
-  const loadingLabel = label === "Delete" || label === "Delete domain" ? "Deleting…" : label === "Revoke" ? "Revoking…" : "Checking…";
+  const loadingLabel = label === "Delete domain" ? "Deleting…" : label === "Revoke" ? "Revoking…" : "Checking…";
   return `<form class="inline-form" method="post" action="${action}" hx-confirm="${esc(confirm)}"><button type="submit" class="${cls}" data-loading-label="${loadingLabel}">${esc(label)}</button></form>`;
 }
 
@@ -979,7 +965,7 @@ function domainOverview(
   const mailFromChapter = `<section class="chapter">
       <h2>Return address</h2>
       <p class="section-lede">Use a subdomain such as <code>bounce.${esc(domain.domain)}</code> when you want bounces to return to this domain. Leave it blank for the default.</p>
-      <form class="toolbar" method="post" action="/ui/domains/${esc(domain.id)}/mailfrom" hx-confirm="Save this return address domain?">
+      <form class="toolbar" method="post" action="/ui/domains/${esc(domain.id)}/mailfrom" hx-confirm="Save this return address?">
         <label><span>Return address domain</span><input name="mailFrom" type="text" inputmode="url" placeholder="bounce.${esc(domain.domain)}" value="${esc(mailFrom)}"></label>
         <button type="submit" class="btn btn-sm" data-loading-label="Saving…">Save return address</button>
       </form>
@@ -1229,7 +1215,7 @@ function domainKeysView(
         <td class="t-mut">${expiryCell(k.expires_at)}</td>
         <td class="t-mut">${formatDate(k.created_at)}</td>
         <td class="right">
-          <div class="row-actions key-action-cell">
+          <div class="key-action-cell">
             <form class="inline-form key-expiry-form" method="post" action="/ui/domains/${esc(domain.id)}/keys/${esc(k.id)}/expiry">
               <input type="date" name="expiresAt" value="${k.expires_at ? new Date(k.expires_at).toISOString().slice(0, 10) : ""}" aria-label="Expiry date for ${esc(k.key_name)}">
               <button type="submit" class="act" data-loading-label="Saving…">Save</button>
@@ -1243,7 +1229,7 @@ function domainKeysView(
   const createKeyChapter =
     domain.status === "verified"
       ? `<section class="chapter">
-           <h2>Create a key</h2>
+           <h2>Create API key</h2>
            <form class="form-grid" method="post" action="/ui/domains/${esc(domain.id)}/keys" hx-confirm="Create an API key for this domain?">
              <label class="form-wide"><span>Key name</span><input name="keyName" placeholder="Production app" required></label>
              <label><span>Per-minute limit</span><input name="rateLimitPerMinute" type="number" min="1" max="1000000" aria-describedby="key-limit-help"></label>
@@ -1258,7 +1244,7 @@ function domainKeysView(
       <h2>Keys</h2>
       <div class="table-wrap"><table>
         <thead><tr><th>Name</th><th>Key</th><th>Access</th><th>Limits</th><th>Expires</th><th>Created</th><th class="right">Actions</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="7">${emptyState("No API keys yet", domain.status === "verified" ? "Create your first key to send email from this domain." : "Verify this domain before creating an API key.")}</td></tr>`}</tbody>
+        <tbody>${rows || `<tr><td colspan="7">${emptyState("No API keys yet", domain.status === "verified" ? "Create your first API key to send email from this domain." : "Verify this domain before creating an API key.")}</td></tr>`}</tbody>
       </table></div>
     </section>`;
   const testEmailChapter = domain.status === "verified" && keys.length > 0 ? `<section class="chapter test-email">
@@ -1328,7 +1314,7 @@ async function sendTestEmail(req: Req, domain: DomainRow, recipient: string, use
 function keysBody(domain: DomainRow, keys: DomainKeys, banner = ""): string {
   const verificationNotice = domain.status === "verified"
     ? ""
-    : `<div class="alert mut" role="status">Verify this domain first. You can create keys once DNS is ready. <a href="/ui/domains/${esc(domain.id)}">Check DNS</a></div>`;
+    : `<div class="alert mut" role="status">Verify this domain first. You can create API keys once DNS is ready. <a href="/ui/domains/${esc(domain.id)}">Check DNS</a></div>`;
   return `${crumbs([{ label: "Domains", href: "/dashboard" }, { label: domain.domain, href: `/ui/domains/${esc(domain.id)}` }, { label: "API keys" }])}
     <h1>API keys</h1>
     <p class="lede">Keys let your apps send email from ${esc(domain.domain)}. Keep them private.</p>
