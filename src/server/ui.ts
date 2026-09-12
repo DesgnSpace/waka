@@ -271,6 +271,8 @@ th.right,td.right{text-align:right;white-space:nowrap}
 .t-sub{display:block;color:var(--ink-3);font-size:13px;margin-top:2px}
 .t-mut{color:var(--ink-3)}
 .logs td{font-size:14px}
+.logs .sent{white-space:nowrap}
+.result-count{color:var(--ink-2);font-size:14px;margin:0 0 12px}
 
 /* status — color + word (never color alone) */
 .status-badge{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;white-space:nowrap}
@@ -370,9 +372,9 @@ th.right,td.right{text-align:right;white-space:nowrap}
 @media(prefers-reduced-motion:reduce){.cpop{transition:none}}
 .cpop-q{margin-bottom:12px;line-height:1.5;font-size:13px}
 .cpop-actions{display:flex;gap:8px;justify-content:flex-end;align-items:center}
-.filter-form{display:grid;gap:12px}
-.filter-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.filter-actions{display:flex;gap:8px}
+.filters{display:grid;grid-template-columns:repeat(3,1fr);gap:16px 20px;margin-bottom:32px}
+.filters label{margin:0}
+.filter-actions{grid-column:1/-1;display:flex;gap:12px;align-items:center}
 .key-action-cell{display:flex;gap:6px;justify-content:flex-end;align-items:center}
 .key-expiry-form{display:flex;gap:4px;align-items:center}
 .key-expiry-form input{width:150px;padding:6px 8px;font-size:13px}
@@ -399,7 +401,7 @@ th.right,td.right{text-align:right;white-space:nowrap}
   .chapter{margin-top:32px}
   .chapter-head{display:block}
   .chapter-head .btn{margin-top:12px}
-  .filter-grid{grid-template-columns:1fr}
+  .filters{grid-template-columns:1fr}
   .copy-field{grid-template-columns:64px minmax(0,1fr);gap:8px}
   .copy-field .cbtn{grid-column:2;justify-self:start}
   .keyout{display:block}
@@ -1106,22 +1108,16 @@ function domainLogsFilterForm(domainId: string, filters: EmailLogsFilters): stri
   const statusOptions = Object.keys(LOG_STATUS_LABELS)
     .map((value) => `<option value="${esc(value)}"${(filters.status ?? "") === value ? " selected" : ""}>${esc(LOG_STATUS_LABELS[value])}</option>`)
     .join("");
-  return `<form method="get" action="/ui/domains/${esc(domainId)}/logs" class="block filter-form">
-    <div class="filter-grid">
-      <label><span>Who received it</span><input name="recipient" type="text" placeholder="recipient@example.com" value="${esc(filters.recipient ?? "")}"></label>
-      <label><span>Subject contains</span><input name="subject" type="text" placeholder="Welcome" value="${esc(filters.subject ?? "")}"></label>
-    </div>
-    <div class="filter-grid">
-      <label><span>Sent on or after</span><input name="from" type="date" value="${esc(filters.fromDate?.slice(0, 10) ?? "")}"></label>
-      <label><span>Sent on or before</span><input name="to" type="date" value="${esc(filters.toDate?.slice(0, 10) ?? "")}"></label>
-    </div>
-    <div class="filter-grid">
-      <label><span>Message ID</span><input name="message_id" type="text" placeholder="Message or provider ID" value="${esc(filters.messageId ?? "")}"></label>
-      <label><span>Delivery status</span><select name="status">${statusOptions}</select></label>
-    </div>
+  return `<form method="get" action="/ui/domains/${esc(domainId)}/logs" class="filters">
+    <label><span>Recipient</span><input name="recipient" type="text" placeholder="name@example.com" value="${esc(filters.recipient ?? "")}"></label>
+    <label><span>Subject contains</span><input name="subject" type="text" placeholder="Welcome" value="${esc(filters.subject ?? "")}"></label>
+    <label><span>Status</span><select name="status">${statusOptions}</select></label>
+    <label><span>Sent from</span><input name="from" type="date" value="${esc(filters.fromDate?.slice(0, 10) ?? "")}"></label>
+    <label><span>Sent until</span><input name="to" type="date" value="${esc(filters.toDate?.slice(0, 10) ?? "")}"></label>
+    <label><span>Message id</span><input name="message_id" type="text" placeholder="Message or provider id" value="${esc(filters.messageId ?? "")}"></label>
     <div class="filter-actions">
-      <button type="submit" class="btn btn-sm">Search messages</button>
-      <a class="btn btn-quiet btn-sm" href="/ui/domains/${esc(domainId)}/logs">Clear</a>
+      <button type="submit" class="btn btn-sm">Search</button>
+      <a class="act" href="/ui/domains/${esc(domainId)}/logs">Clear</a>
     </div>
   </form>`;
 }
@@ -1131,10 +1127,8 @@ function domainLogsView(logs: Array<{ id: string; from_email: string; to_emails:
   const rows = logs
     .map(
       (r) => `<tr>
-        <td class="t-mut">${esc(r.created_at)}</td>
-        <td>${esc(r.from_email)}</td>
-        <td class="t-mut">${esc(r.to_emails.join(", "))}</td>
-        <td>${esc(r.subject)}</td>
+        <td class="sent t-mut">${formatDate(r.created_at)}</td>
+        <td><span class="t-name">${esc(r.subject)}</span><span class="t-sub">${esc(r.from_email)} to ${esc(r.to_emails.join(", "))}</span></td>
         <td>${statusTag(r.status)}</td>
         <td class="right">${count(r.open_count)}</td>
         <td class="right">${count(r.click_count)}</td>
@@ -1142,10 +1136,10 @@ function domainLogsView(logs: Array<{ id: string; from_email: string; to_emails:
     )
     .join("");
   return `<table class="logs">
-    <thead><tr><th>When</th><th>From</th><th>To</th><th>Subject</th><th>Status</th><th class="right">Opens</th><th class="right">Clicks</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="7">${filtered
-      ? emptyState("No messages match your search", "Change the filters or clear them to see all messages.")
-      : emptyState("No email activity yet", "Create an API key, send a test email from API keys, and activity will appear here.")}</td></tr>`}</tbody>
+    <thead><tr><th>Sent</th><th>Message</th><th>Status</th><th class="right">Opens</th><th class="right">Clicks</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="5">${filtered
+      ? emptyState("No messages match your search", "Change the filters or clear them to see every message.")
+      : emptyState("No email activity yet", "Create an API key, send a test email, and activity appears here.")}</td></tr>`}</tbody>
   </table>`;
 }
 
@@ -1158,10 +1152,13 @@ export async function uiDomainLogs(req: Req): Promise<Response> {
   }
   const filters = normalizeLogsFilters(Object.fromEntries(new URL(req.url).searchParams));
   const filtered = Object.values(filters).some((value) => value !== null);
+  const verificationNotice = domain.status === "verified"
+    ? ""
+    : `<div class="alert mut" role="status">This domain is not verified yet, so nothing can be sent from it until DNS is ready. <a href="/ui/domains/${esc(domain.id)}">Check DNS</a></div>`;
   const header = `${crumbs([{ label: "Domains", href: "/dashboard" }, { label: domain.domain, href: `/ui/domains/${esc(domain.id)}` }, { label: "Email activity" }])}
     <h1>Email activity</h1>
-    <p class="lede">Messages sent from ${esc(domain.domain)} and the delivery updates we receive.</p>
-    <p class="section-lede">Domain status: ${verifyStatusTag(domain.status)}</p>`;
+    <p class="lede">Messages sent from ${esc(domain.domain)} and the delivery updates received for them.</p>
+    ${verificationNotice}`;
   const invalidDate =
     (filters.fromDate && isNaN(Date.parse(filters.fromDate)) && "Enter a start date as YYYY-MM-DD.") ||
     (filters.toDate && isNaN(Date.parse(filters.toDate)) && "Enter an end date as YYYY-MM-DD.");
@@ -1176,9 +1173,11 @@ export async function uiDomainLogs(req: Req): Promise<Response> {
     console.error("load email activity failed:", err);
     return problemPage(req, "Email activity", "We could not load email activity. Refresh the page and try again.", user);
   }
+  const resultCount = logs.length ? `<p class="result-count">${filtered ? `${logs.length} messages match` : `Latest ${logs.length} messages`}</p>` : "";
   const body = `${header}
     ${flashFrom(req)}
     ${domainLogsFilterForm(domain.id, filters)}
+    ${resultCount}
     <div class="table-wrap">${domainLogsView(logs, filtered)}</div>`;
   return renderPage(req, `${domain.domain} Email activity`, body, user);
 }
