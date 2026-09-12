@@ -120,6 +120,10 @@ function replaceRegions(
   for (let start = html.indexOf("<", search); start !== -1; start = html.indexOf("<", search)) {
     if (openerEnd <= start) openerEnd = html.indexOf(">", start + 1);
     if (openerEnd === -1) break;
+    if (html[start + 1] === "/") {
+      search = start + 1;
+      continue;
+    }
 
     const name = tagName(html.slice(start, Math.min(openerEnd + 1, start + MAX_TAG_NAME)));
     const closer = opens(name) ? closerFor(name) : "";
