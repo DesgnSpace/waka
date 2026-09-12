@@ -43,6 +43,8 @@ export function serveOptions() {
       "/login": methods({ GET: ui.loginPage, POST: ui.doLogin }),
       "/logout": methods({ POST: ui.logout }),
       "/dashboard": methods({ GET: ui.dashboard }),
+      "/ui/docs": methods({ GET: ui.uiDocs }),
+      "/ui/docs/:topic": methods({ GET: ui.uiDocsTopic }),
       "/ui/domains": methods({ GET: ui.uiDomains, POST: ui.uiAddDomain }),
       "/ui/domains/:id": methods({ GET: ui.uiDomain }),
       "/ui/domains/:id/dns.zone": methods({ GET: ui.uiDomainDns }),
