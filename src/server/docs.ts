@@ -490,10 +490,10 @@ const limits = [
     table(
       ["Action", "Limit"],
       [
-        ["Signing in", "10 attempts a minute per address, and 10 a minute per email"],
-        ["Signing up", "3 an hour per address, 3 an hour per email, 100 an hour overall"],
-        ["The DNS checker tool", "10 checks a minute per address"],
-        ["The dashboard's test email", "the same account and address limits as any send, and it counts against the daily allowance"],
+        ["Signing in", "10 attempts a minute per IP address, and 10 a minute per email"],
+        ["Signing up", "3 an hour per IP address, 3 an hour per email, 100 an hour overall"],
+        ["The DNS checker tool", "10 checks a minute per IP address"],
+        ["The dashboard's test email", "the same account and IP address limits as any send, and it counts against the daily allowance"],
       ],
     ),
     p(
