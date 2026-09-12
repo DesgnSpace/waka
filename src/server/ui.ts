@@ -24,6 +24,7 @@ import {
 import { getDomainApiKeys, generateApiKey, deleteApiKey } from "@/lib/api-keys";
 import { sendEmail } from "@/lib/ses";
 import { query } from "@/lib/database";
+import { buildEmailLogsWhere, normalizeLogsFilters, toRangeEnd, toRangeStart, type EmailLogsFilters } from "@/lib/email-logs";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 import { reserveDailySend } from "@/lib/quotas";
 
@@ -901,7 +902,17 @@ function zoneFile(domain: string, records: DnsRecord[]): string {
 
 // --- logs --------------------------------------------------------------------
 
-async function getDomainEmailLogs(userId: string, domainId: string) {
+async function getDomainEmailLogs(userId: string, domainId: string, filters: EmailLogsFilters) {
+  const where = buildEmailLogsWhere(
+    {
+      ...filters,
+      domainId: null,
+      fromDate: filters.fromDate ? toRangeStart(filters.fromDate) : null,
+      toDate: filters.toDate ? toRangeEnd(filters.toDate) : null,
+    },
+    3,
+  );
+  const whereSql = where.clauses.length ? `AND ${where.clauses.join(" AND ")}` : "";
   const result = await query(
     `SELECT el.id, el.from_email, el.to_emails, el.subject, el.status, el.created_at,
             COUNT(ev.*) FILTER (WHERE ev.type = 'open')  AS open_count,
@@ -910,9 +921,10 @@ async function getDomainEmailLogs(userId: string, domainId: string) {
      JOIN domains d ON el.domain_id = d.id
      LEFT JOIN email_events ev ON ev.email_log_id = el.id
      WHERE d.user_id = $1 AND el.domain_id = $2
+       ${whereSql}
      GROUP BY el.id
      ORDER BY el.created_at DESC LIMIT 50`,
-    [userId, domainId]
+    [userId, domainId, ...where.params]
   );
   return result.rows.map((r) => {
     let to: string[] = [];
@@ -932,7 +944,41 @@ async function getDomainEmailLogs(userId: string, domainId: string) {
   });
 }
 
-function domainLogsView(logs: Array<{ id: string; from_email: string; to_emails: string[]; subject: string; status: string; created_at: string; open_count?: number; click_count?: number }>): string {
+const LOG_STATUS_LABELS: Record<string, string> = {
+  "": "Any status",
+  sent: "Accepted",
+  delivered: "Delivered",
+  bounced: "Not delivered",
+  complained: "Spam complaint",
+  failed: "Failed",
+  pending: "Processing",
+};
+
+function domainLogsFilterForm(domainId: string, filters: EmailLogsFilters): string {
+  const statusOptions = Object.keys(LOG_STATUS_LABELS)
+    .map((value) => `<option value="${esc(value)}"${(filters.status ?? "") === value ? " selected" : ""}>${esc(LOG_STATUS_LABELS[value])}</option>`)
+    .join("");
+  return `<form method="get" action="/ui/domains/${esc(domainId)}/logs" class="block" style="display:grid;gap:12px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <label><span>Who received it</span><input name="recipient" type="text" placeholder="recipient@example.com" value="${esc(filters.recipient ?? "")}"></label>
+      <label><span>Subject contains</span><input name="subject" type="text" placeholder="Welcome" value="${esc(filters.subject ?? "")}"></label>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <label><span>Sent on or after</span><input name="from" type="date" value="${esc(filters.fromDate?.slice(0, 10) ?? "")}"></label>
+      <label><span>Sent on or before</span><input name="to" type="date" value="${esc(filters.toDate?.slice(0, 10) ?? "")}"></label>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <label><span>Message ID</span><input name="message_id" type="text" placeholder="message or provider id" value="${esc(filters.messageId ?? "")}"></label>
+      <label><span>Delivery status</span><select name="status" style="width:100%;font:inherit;color:var(--fg);background:var(--faint);border:0;border-radius:6px;padding:10px 12px">${statusOptions}</select></label>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button type="submit" class="btn btn-sm">Search messages</button>
+      <a class="btn btn-quiet btn-sm" href="/ui/domains/${esc(domainId)}/logs">Clear</a>
+    </div>
+  </form>`;
+}
+
+function domainLogsView(logs: Array<{ id: string; from_email: string; to_emails: string[]; subject: string; status: string; created_at: string; open_count?: number; click_count?: number }>, filtered: boolean): string {
   const count = (n?: number) => (n && n > 0 ? `<span class="t-name">${n}</span>` : `<span class="t-mut">—</span>`);
   const rows = logs
     .map(
@@ -949,7 +995,9 @@ function domainLogsView(logs: Array<{ id: string; from_email: string; to_emails:
     .join("");
   return `<table class="logs">
     <thead><tr><th>when</th><th>from</th><th>to</th><th>subject</th><th>status</th><th class="right">opens</th><th class="right">clicks</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="7">${emptyState("No email activity yet", "Create an API key, send a test email from API keys, and activity will appear here.")}</td></tr>`}</tbody>
+    <tbody>${rows || `<tr><td colspan="7">${filtered
+      ? emptyState("No messages match your search", "Change the filters or clear them to see all messages.")
+      : emptyState("No email activity yet", "Create an API key, send a test email from API keys, and activity will appear here.")}</td></tr>`}</tbody>
   </table>`;
 }
 
@@ -960,20 +1008,31 @@ export async function uiDomainLogs(req: Req): Promise<Response> {
   if (!domain) {
     return renderPage(req, "Not found", `${crumbs([{ label: "domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user, { status: 404 });
   }
+  const filters = normalizeLogsFilters(Object.fromEntries(new URL(req.url).searchParams));
+  const filtered = Object.values(filters).some((value) => value !== null);
+  const header = `${crumbs([{ label: "domains", href: "/dashboard" }, { label: domain.domain, href: `/ui/domains/${esc(domain.id)}` }, { label: "email activity" }])}
+    <h1>Email activity</h1>
+    <p class="lede">Messages sent from ${esc(domain.domain)} and the delivery updates we receive.</p>
+    <p class="section-lede">Domain status: ${verifyStatusTag(domain.status)}</p>`;
+  const invalidDate =
+    (filters.fromDate && isNaN(Date.parse(filters.fromDate)) && "Enter a start date as YYYY-MM-DD.") ||
+    (filters.toDate && isNaN(Date.parse(filters.toDate)) && "Enter an end date as YYYY-MM-DD.");
+  if (invalidDate) {
+    const body = `${header}${alert("err", invalidDate)}${detailTabs(domain, "logs")}${domainLogsFilterForm(domain.id, filters)}`;
+    return renderPage(req, `${domain.domain} logs`, body, user, { status: 400 });
+  }
   let logs: Awaited<ReturnType<typeof getDomainEmailLogs>>;
   try {
-    logs = await getDomainEmailLogs(user.id, domain.id);
+    logs = await getDomainEmailLogs(user.id, domain.id, filters);
   } catch (err) {
     console.error("load email activity failed:", err);
     return problemPage(req, "Email activity", "We could not load email activity. Refresh the page and try again.", user);
   }
-  const body = `${crumbs([{ label: "domains", href: "/dashboard" }, { label: domain.domain, href: `/ui/domains/${esc(domain.id)}` }, { label: "email activity" }])}
-    <h1>Email activity</h1>
-    <p class="lede">Messages sent from ${esc(domain.domain)} and the delivery updates we receive.</p>
-    <p class="section-lede">Domain status: ${verifyStatusTag(domain.status)}</p>
+  const body = `${header}
     ${flashFrom(req)}
     ${detailTabs(domain, "logs")}
-    <div class="table-wrap">${domainLogsView(logs)}</div>`;
+    ${domainLogsFilterForm(domain.id, filters)}
+    <div class="table-wrap">${domainLogsView(logs, filtered)}</div>`;
   return renderPage(req, `${domain.domain} logs`, body, user);
 }
 

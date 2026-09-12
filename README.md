@@ -165,7 +165,7 @@ The response returns the same `id` shape as an immediate send, right away. A wor
 - `PUT|DELETE /api/api-keys/:id`
 - `POST /api/emails`
 - `POST /api/emails/batch`
-- `GET /api/emails/logs`
+- `GET /api/emails/logs` — paged (`page`, `limit`, default 50). Query filters (all optional, combined with AND): `domain_id` (UUID), `status` (`pending`|`sent`|`failed`|`delivered`|`bounced`|`complained`|`scheduled`|`sending`), `recipient` (substring match against `to`/`cc`/`bcc`, case-insensitive), `subject` (substring, case-insensitive), `from`/`to` (ISO 8601 timestamps; aliases `from_date`/`to_date`/`start_date`/`end_date`/`startDate`/`endDate`; date-only `YYYY-MM-DD` treats `to` as end-of-day), `message_id`/`messageId` (exact match against `id`, `ses_message_id`, or `message_id`). Tenant-isolated: an API key sees only its domain, a dashboard JWT only owned domains. The dashboard filter form at `/ui/domains/:id/logs` uses the same query path.
 - `GET /api/emails/:id`
 - `POST /api/webhooks/ses`
 - `POST /api/tools/email-dns-checker`
