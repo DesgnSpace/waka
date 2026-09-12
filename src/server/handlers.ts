@@ -417,6 +417,9 @@ async function deliverOne(
   domain: { id: string; domain: string },
   data: ValidatedSend,
   reqForAddress: Request,
+  // Fires once the message leaves our control — queued for a later send or
+  // handed to SES — so a caller can tell "rejected up front" from "may be out".
+  onProviderHandoff?: () => void,
 ): Promise<{ id: string; from: string; to: string[]; created_at: string }> {
   const { from, to, cc, bcc, subject, html, text, attachments, reply_to, tags } = data;
 
@@ -473,6 +476,7 @@ async function deliverOne(
   }));
 
   if (schedule.at) {
+    onProviderHandoff?.();
     try {
       const id = await storeScheduledEmail({
         apiKeyId: apiKey.id,
@@ -501,6 +505,7 @@ async function deliverOne(
   }
 
   let messageId: string;
+  onProviderHandoff?.();
   try {
     messageId = await sendEmail({
       from,
@@ -668,89 +673,89 @@ export async function sendBatchHandler(req: Req): Promise<Response> {
     claim = reservation;
   }
 
-  const rawBody = await jsonBody(req);
-  if (!Array.isArray(rawBody)) {
-    if (claim) await releaseIdempotencyKey(claim.id);
-    throw new HttpError(400, { error: "Request body must be a JSON array of email objects." });
-  }
-  if (rawBody.length === 0) {
-    if (claim) await releaseIdempotencyKey(claim.id);
-    throw new HttpError(400, { error: "Batch must contain at least one email." });
-  }
-  if (rawBody.length > MAX_BATCH_SIZE) {
-    if (claim) await releaseIdempotencyKey(claim.id);
-    throw new HttpError(400, { error: `Batch size exceeds maximum of ${MAX_BATCH_SIZE} emails.` });
-  }
-
-  const domain = await getDomainById(apiKey.domain_id, apiKey.user_id);
-  if (!domain) {
-    if (claim) await releaseIdempotencyKey(claim.id);
-    return json({ error: "Domain not found" }, 404);
-  }
-  if (domain.status !== "verified") {
-    if (claim) await releaseIdempotencyKey(claim.id);
-    return json({ error: "Domain isn't verified. Verify DNS and try again." }, 400);
-  }
-
-  const results: Array<Record<string, unknown>> = [];
-  let hasSuccess = false;
-  let hasError = false;
-
-  for (let i = 0; i < rawBody.length; i++) {
-    const raw = rawBody[i];
-    let parsed: ValidatedSend;
-    try {
-      parsed = sendEmailSchema.parse(raw);
-    } catch (err) {
-      hasError = true;
-      if (err instanceof z.ZodError) {
-        const reasons = err.issues.map((iss) => {
-          const path = iss.path.join(".");
-          return path ? `${path}: ${iss.message}` : iss.message;
-        });
-        const reason = reasons.length ? reasons.join("; ") : "Invalid request data";
-        results.push({ error: reason, message: reason, statusCode: 422, details: err.issues });
-      } else {
-        results.push({ error: errorMessage(err), message: errorMessage(err), statusCode: 422 });
-      }
-      continue;
+  // Nothing reached a provider means nothing is out there to duplicate, so the
+  // key goes back and a corrected retry is processed instead of replaying this.
+  let handedToProvider = false;
+  try {
+    const rawBody = await jsonBody(req);
+    if (!Array.isArray(rawBody)) {
+      throw new HttpError(400, { error: "Request body must be a JSON array of email objects." });
+    }
+    if (rawBody.length === 0) {
+      throw new HttpError(400, { error: "Batch must contain at least one email." });
+    }
+    if (rawBody.length > MAX_BATCH_SIZE) {
+      throw new HttpError(400, { error: `Batch size exceeds maximum of ${MAX_BATCH_SIZE} emails.` });
     }
 
-    try {
-      const delivered = await deliverOne(apiKey, domain, parsed, req);
-      hasSuccess = true;
-      results.push(delivered as unknown as Record<string, unknown>);
-    } catch (err) {
-      hasError = true;
-      if (err instanceof HttpError) {
-        const body = err.body as Record<string, unknown>;
-        results.push({ statusCode: err.status, ...body });
-      } else if (err instanceof z.ZodError) {
-        const reasons = err.issues.map((iss) => {
-          const path = iss.path.join(".");
-          return path ? `${path}: ${iss.message}` : iss.message;
+    const domain = await getDomainById(apiKey.domain_id, apiKey.user_id);
+    if (!domain) return json({ error: "Domain not found" }, 404);
+    if (domain.status !== "verified") {
+      return json({ error: "Domain isn't verified. Verify DNS and try again." }, 400);
+    }
+
+    const results: Array<Record<string, unknown>> = [];
+    let hasError = false;
+
+    for (let i = 0; i < rawBody.length; i++) {
+      const raw = rawBody[i];
+      let parsed: ValidatedSend;
+      try {
+        parsed = sendEmailSchema.parse(raw);
+      } catch (err) {
+        hasError = true;
+        if (err instanceof z.ZodError) {
+          const reasons = err.issues.map((iss) => {
+            const path = iss.path.join(".");
+            return path ? `${path}: ${iss.message}` : iss.message;
+          });
+          const reason = reasons.length ? reasons.join("; ") : "Invalid request data";
+          results.push({ error: reason, message: reason, statusCode: 422, details: err.issues });
+        } else {
+          results.push({ error: errorMessage(err), message: errorMessage(err), statusCode: 422 });
+        }
+        continue;
+      }
+
+      try {
+        const delivered = await deliverOne(apiKey, domain, parsed, req, () => {
+          handedToProvider = true;
         });
-        const reason = reasons.length ? reasons.join("; ") : "Invalid request data";
-        results.push({ error: reason, message: reason, statusCode: 422, details: err.issues });
-      } else {
-        const msg = errorMessage(err);
-        results.push({ error: msg, message: msg, statusCode: 500 });
+        results.push(delivered as unknown as Record<string, unknown>);
+      } catch (err) {
+        hasError = true;
+        if (err instanceof HttpError) {
+          const body = err.body as Record<string, unknown>;
+          results.push({ statusCode: err.status, ...body });
+        } else if (err instanceof z.ZodError) {
+          const reasons = err.issues.map((iss) => {
+            const path = iss.path.join(".");
+            return path ? `${path}: ${iss.message}` : iss.message;
+          });
+          const reason = reasons.length ? reasons.join("; ") : "Invalid request data";
+          results.push({ error: reason, message: reason, statusCode: 422, details: err.issues });
+        } else {
+          const msg = errorMessage(err);
+          results.push({ error: msg, message: msg, statusCode: 500 });
+        }
       }
     }
-  }
 
-  const responseBody = { data: results };
-  const status = hasError && hasSuccess ? 207 : hasError ? 207 : 200;
+    const responseBody = { data: results };
+    const status = hasError ? 207 : 200;
 
-  if (claim) {
-    try {
-      await completeIdempotencyKey(claim.id, status, responseBody);
-    } catch (completeError) {
-      console.error("Failed to store idempotent batch outcome:", completeError);
+    if (claim && handedToProvider) {
+      try {
+        await completeIdempotencyKey(claim.id, status, responseBody);
+      } catch (completeError) {
+        console.error("Failed to store idempotent batch outcome:", completeError);
+      }
     }
-  }
 
-  return jsonResponse(responseBody, status, {});
+    return jsonResponse(responseBody, status, {});
+  } finally {
+    if (claim && !handedToProvider) await releaseIdempotencyKey(claim.id);
+  }
 }
 
 export async function emailLogs(req: Req): Promise<Response> {
