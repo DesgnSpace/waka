@@ -24,7 +24,20 @@ import {
 import { getDomainApiKeys, generateApiKey, deleteApiKey, updateApiKey } from "@/lib/api-keys";
 import { sendEmail } from "@/lib/ses";
 import { query } from "@/lib/database";
-import { buildEmailLogsWhere, normalizeLogsFilters, toRangeEnd, toRangeStart, type EmailLogsFilters } from "@/lib/email-logs";
+import {
+  buildEmailLogsWhere,
+  getEmailLogDetail,
+  getEmailLogEngagementEvents,
+  getEmailLogWebhookEvents,
+  normalizeLogsFilters,
+  toRangeEnd,
+  toRangeStart,
+  type EmailDetailRow,
+  type EmailEngagementEvent,
+  type EmailLogsFilters,
+  type EmailWebhookEvent,
+} from "@/lib/email-logs";
+import { isRecord, parseJsonArray, parseJsonObject, parseStringArray } from "@/lib/serialization";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
 import { reserveDailySend } from "@/lib/quotas";
 import { DOC_TOPICS, findDocTopic } from "./docs";
@@ -268,6 +281,31 @@ th.right,td.right{text-align:right;white-space:nowrap}
 .logs .sent{white-space:nowrap}
 .result-count{color:var(--ink-2);font-size:14px;margin:0 0 12px}
 
+/* email detail */
+.detail-heading{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.detail-heading h1{margin:0}
+.meta{display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px 16px}
+.meta dt{color:var(--ink-3);font-size:13px}
+.meta dd{min-width:0;font-size:15px;overflow-wrap:anywhere}
+.meta-code{overflow-wrap:anywhere}
+.meta dd .cbtn{margin-left:8px}
+.meta-error{color:var(--danger)}
+.timeline{list-style:none;padding:0}
+.timeline-row{display:grid;grid-template-columns:140px minmax(0,1fr);gap:16px;padding:12px 0}
+.timeline-row + .timeline-row{border-top:1px solid var(--line)}
+.timeline-time{color:var(--ink-3);font-size:13px;white-space:nowrap}
+.timeline-event{min-width:0}
+.timeline-meta{display:block;color:var(--ink-3);font-size:13px;overflow-wrap:anywhere;margin-top:2px}
+.timeline-empty{padding:16px 0}
+.message-body{max-width:65ch;white-space:pre-wrap;overflow-wrap:anywhere}
+.message-source{max-width:100%;background:var(--surface);border-radius:8px;padding:14px 16px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
+.detail-subheading{font-size:14px;line-height:1.4;font-weight:500;margin:24px 0 8px}
+.detail-attachments ul{list-style:none;padding:0}
+.detail-attachments li{display:flex;justify-content:space-between;gap:16px;padding:8px 0}
+.detail-attachments li + li{border-top:1px solid var(--line)}
+.attachment-name{overflow-wrap:anywhere}
+.attachment-size{color:var(--ink-3);font-size:13px;white-space:nowrap}
+
 /* status — color + word (never color alone) */
 .status-badge{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;white-space:nowrap}
 .status-mark{display:inline-block;width:8px;height:8px;border-radius:50%;background:currentColor}
@@ -400,6 +438,8 @@ th.right,td.right{text-align:right;white-space:nowrap}
   .filters{grid-template-columns:1fr}
   .copy-field{grid-template-columns:64px minmax(0,1fr);gap:8px}
   .copy-field .cbtn{grid-column:2;justify-self:start}
+  .meta{grid-template-columns:96px minmax(0,1fr);gap:8px 12px}
+  .timeline-row{grid-template-columns:112px minmax(0,1fr);gap:12px}
   .keyout{display:block}
   .keyout code{display:block}
   .keyout .cbtn{margin-top:8px}
@@ -1123,18 +1163,19 @@ function domainLogsFilterForm(domainId: string, filters: EmailLogsFilters): stri
   </form>`;
 }
 
-function domainLogsView(logs: Array<{ id: string; from_email: string; to_emails: string[]; subject: string; status: string; created_at: string; open_count?: number; click_count?: number }>, filtered: boolean): string {
+function domainLogsView(domainId: string, logs: Array<{ id: string; from_email: string; to_emails: string[]; subject: string | null; status: string; created_at: string; open_count?: number; click_count?: number }>, filtered: boolean): string {
   const count = (n?: number) => (n && n > 0 ? `<span class="t-name">${n}</span>` : `<span class="t-mut">—</span>`);
   const rows = logs
-    .map(
-      (r) => `<tr>
+    .map((r) => {
+      const subject = r.subject || "(no subject)";
+      return `<tr>
         <td class="sent t-mut">${formatDate(r.created_at)}</td>
-        <td><span class="t-name">${esc(r.subject)}</span><span class="t-sub">${esc(r.from_email)} to ${esc(r.to_emails.join(", "))}</span></td>
+        <td><a class="t-name" href="/ui/domains/${esc(domainId)}/logs/${esc(r.id)}">${esc(subject)}</a><span class="t-sub">${esc(r.from_email)} to ${esc(r.to_emails.join(", "))}</span></td>
         <td>${statusTag(r.status)}</td>
         <td class="right">${count(r.open_count)}</td>
         <td class="right">${count(r.click_count)}</td>
-      </tr>`
-    )
+      </tr>`;
+    })
     .join("");
   return `<table class="logs">
     <thead><tr><th>Sent</th><th>Message</th><th>Status</th><th class="right">Opens</th><th class="right">Clicks</th></tr></thead>
@@ -1142,6 +1183,204 @@ function domainLogsView(logs: Array<{ id: string; from_email: string; to_emails:
       ? emptyState("No messages match your search", "Change the filters or clear them to see every message.")
       : emptyState("No email activity yet", "Create an API key, send a test email, and activity appears here.")}</td></tr>`}</tbody>
   </table>`;
+}
+
+function emailSubject(log: EmailDetailRow): string {
+  return log.subject?.trim() || "(no subject)";
+}
+
+function addressList(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function replyToAddresses(log: EmailDetailRow): string[] {
+  if (log.reply_to != null) return addressList(log.reply_to);
+  const payload = parseJsonObject(log.payload, "payload");
+  return addressList(payload.replyTo ?? payload.reply_to);
+}
+
+function detailAttachments(value: unknown): Array<{ filename: string; size: number | null }> {
+  return parseJsonArray(value, "attachments").flatMap((item) => {
+    if (!isRecord(item) || typeof item.filename !== "string") return [];
+    const size = typeof item.size === "number" && Number.isFinite(item.size) && item.size >= 0 ? item.size : null;
+    return [{ filename: item.filename, size }];
+  });
+}
+
+function formatAttachmentSize(size: number | null): string {
+  if (size == null) return "";
+  if (size < 1024) return `${size} bytes`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${Number((size / (1024 * 1024)).toFixed(1))} MB`;
+}
+
+function metaText(label: string, value: string): string {
+  return `<dt>${esc(label)}</dt><dd>${esc(value)}</dd>`;
+}
+
+function metaCode(label: string, value: string, copyLabel: string): string {
+  return `<dt>${esc(label)}</dt><dd><code class="meta-code">${esc(value)}</code>${copyBtn(value, copyLabel)}</dd>`;
+}
+
+function emailMeta(log: EmailDetailRow): string {
+  const to = parseStringArray(log.to_emails, "to_emails");
+  const cc = parseStringArray(log.cc_emails, "cc_emails");
+  const bcc = parseStringArray(log.bcc_emails, "bcc_emails");
+  const replyTo = replyToAddresses(log);
+  const messageId = log.message_id || log.id;
+  const fields = [
+    `<dt>Status</dt><dd>${statusTag(log.status)}</dd>`,
+    metaText("Sent", formatDate(log.created_at)),
+    metaText("From", log.from_email),
+    metaText("To", to.join(", ")),
+    ...(cc.length ? [metaText("Cc", cc.join(", "))] : []),
+    ...(bcc.length ? [metaText("Bcc", bcc.join(", "))] : []),
+    ...(replyTo.length ? [metaText("Reply to", replyTo.join(", "))] : []),
+    metaCode("Message id", messageId, "Copy message id"),
+    ...(log.ses_message_id ? [metaCode("Provider id", log.ses_message_id, "Copy provider id")] : []),
+    ...(log.error_message?.trim() ? [`<dt>Error</dt><dd class="meta-error">${esc(log.error_message.trim())}</dd>`] : []),
+  ];
+  return `<dl class="meta">${fields.join("")}</dl>`;
+}
+
+function bounceDiagnostic(eventData: Record<string, unknown>): string {
+  const bounce = eventData.bounce;
+  if (!isRecord(bounce) || !Array.isArray(bounce.bouncedRecipients)) return "";
+  return bounce.bouncedRecipients
+    .map((recipient) => {
+      if (!isRecord(recipient)) return "";
+      const diagnostic = recipient.diagnosticCode ?? recipient.diagnostic_code;
+      return typeof diagnostic === "string" ? diagnostic : "";
+    })
+    .filter(Boolean)
+    .join("; ");
+}
+
+function normalizedEventType(value: unknown): string {
+  return String(value ?? "").toLowerCase().replace(/[\s_-]/g, "");
+}
+
+function webhookEventLabel(event: EmailWebhookEvent, fallbackDiagnostic = ""): string {
+  const type = normalizedEventType(event.event_type);
+  switch (type) {
+    case "send":
+    case "accepted":
+      return "Accepted by the provider";
+    case "delivery":
+    case "delivered":
+      return "Delivered";
+    case "bounce":
+    case "bounced": {
+      const diagnostic = bounceDiagnostic(event.event_data) || fallbackDiagnostic;
+      return diagnostic ? `Bounced: ${diagnostic}` : "Bounced";
+    }
+    case "complaint":
+    case "complained":
+      return "Spam complaint";
+    case "deliverydelay":
+    case "deliverydelayed":
+      return "Delivery delayed";
+    case "reject":
+    case "rejected":
+      return "Rejected";
+    default:
+      return "Delivery update";
+  }
+}
+
+type TimelineItem = { at: unknown; label: string; userAgent?: string | null; order: number };
+
+function engagementEventLabel(event: EmailEngagementEvent): string {
+  const type = normalizedEventType(event.type);
+  if (type === "click") return `Link clicked${event.link ? `: ${event.link}` : ""}`;
+  if (type === "open") return "Opened";
+  return "Engagement update";
+}
+
+function timelineTime(value: unknown): number {
+  if (typeof value !== "string" && typeof value !== "number" && !(value instanceof Date)) return Number.MAX_SAFE_INTEGER;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : Number.MAX_SAFE_INTEGER;
+}
+
+function timelineView(
+  log: EmailDetailRow,
+  webhookEvents: EmailWebhookEvent[],
+  engagementEvents: EmailEngagementEvent[],
+): string {
+  const updates: TimelineItem[] = [
+    ...webhookEvents.map((event, index) => {
+      const fallbackDiagnostic = normalizedEventType(event.event_type) === "bounce"
+        ? log.error_message?.trim() ?? ""
+        : "";
+      return { at: event.created_at, label: webhookEventLabel(event, fallbackDiagnostic), order: index + 1 };
+    }),
+    ...engagementEvents.map((event, index) => ({
+      at: event.created_at,
+      label: engagementEventLabel(event),
+      userAgent: event.user_agent,
+      order: webhookEvents.length + index + 1,
+    })),
+  ];
+  const items: TimelineItem[] = [
+    { at: log.created_at, label: "Sent from Waka", order: 0 },
+    ...updates,
+  ].sort((a, b) => timelineTime(a.at) - timelineTime(b.at) || a.order - b.order);
+  const rows = items
+    .map((item) => `<li class="timeline-row">
+      <time class="timeline-time" datetime="${esc(String(item.at ?? ""))}">${formatDate(item.at)}</time>
+      <div class="timeline-event">${esc(item.label)}${item.userAgent ? `<span class="timeline-meta">User agent: ${esc(item.userAgent)}</span>` : ""}</div>
+    </li>`)
+    .join("");
+  return `<section class="chapter">
+    <h2>Timeline</h2>
+    <ol class="timeline">${rows}</ol>
+    ${updates.length ? "" : `<p class="empty timeline-empty">No delivery updates yet.</p>`}
+  </section>`;
+}
+
+function messageView(log: EmailDetailRow): string {
+  let body: string;
+  if (typeof log.text_content === "string") {
+    body = `<div class="message-body">${esc(log.text_content)}</div>`;
+  } else if (typeof log.html_content === "string") {
+    body = `<pre class="message-source">${esc(log.html_content)}</pre>`;
+  } else {
+    body = `<p class="empty message-empty">The message body is no longer stored.</p>`;
+  }
+
+  const attachments = detailAttachments(log.attachments);
+  const attachmentList = attachments.length
+    ? `<div class="detail-attachments">
+        <h3 class="detail-subheading">Attachments</h3>
+        <ul>${attachments.map((attachment) => `<li><span class="attachment-name">${esc(attachment.filename)}</span>${attachment.size == null ? "" : `<span class="attachment-size">${formatAttachmentSize(attachment.size)}</span>`}</li>`).join("")}</ul>
+      </div>`
+    : "";
+  return `<section class="chapter">
+    <h2>Message</h2>
+    ${body}
+    ${attachmentList}
+  </section>`;
+}
+
+function emailDetailView(
+  domain: DomainRow,
+  log: EmailDetailRow,
+  webhookEvents: EmailWebhookEvent[],
+  engagementEvents: EmailEngagementEvent[],
+): string {
+  const subject = emailSubject(log);
+  return `${crumbs([
+    { label: "Domains", href: "/dashboard" },
+    { label: domain.domain, href: `/ui/domains/${esc(domain.id)}` },
+    { label: "Email activity", href: `/ui/domains/${esc(domain.id)}/logs` },
+    { label: subject },
+  ])}
+    <div class="detail-heading"><h1>${esc(subject)}</h1>${statusTag(log.status)}</div>
+    ${emailMeta(log)}
+    ${timelineView(log, webhookEvents, engagementEvents)}
+    ${messageView(log)}`;
 }
 
 export async function uiDomainLogs(req: Req): Promise<Response> {
@@ -1179,8 +1418,42 @@ export async function uiDomainLogs(req: Req): Promise<Response> {
     ${flashFrom(req)}
     ${domainLogsFilterForm(domain.id, filters)}
     ${resultCount}
-    <div class="table-wrap">${domainLogsView(logs, filtered)}</div>`;
+    <div class="table-wrap">${domainLogsView(domain.id, logs, filtered)}</div>`;
   return renderPage(req, `${domain.domain} Email activity`, body, user);
+}
+
+export async function uiDomainEmailLog(req: Req): Promise<Response> {
+  const user = gate(req);
+  if (user instanceof Response) return user;
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) {
+    return renderPage(req, "Not found", `${crumbs([{ label: "Domains", href: "/dashboard" }])}${alert("err", "Domain not found.")}`, user, { status: 404 });
+  }
+
+  const emailId = pathUuid(req, "emailId");
+  let log: EmailDetailRow | null;
+  let webhookEvents: EmailWebhookEvent[];
+  let engagementEvents: EmailEngagementEvent[];
+  try {
+    log = await getEmailLogDetail(emailId, user.id, domain.id);
+    if (!log) {
+      return renderPage(req, "Not found", `${crumbs([
+        { label: "Domains", href: "/dashboard" },
+        { label: domain.domain, href: `/ui/domains/${esc(domain.id)}` },
+        { label: "Email activity", href: `/ui/domains/${esc(domain.id)}/logs` },
+      ])}${alert("err", "Email not found.")}`, user, { status: 404 });
+    }
+    [webhookEvents, engagementEvents] = await Promise.all([
+      getEmailLogWebhookEvents(emailId, user.id, domain.id),
+      getEmailLogEngagementEvents(emailId, user.id, domain.id),
+    ]);
+  } catch (err) {
+    console.error("load email detail failed:", err);
+    return problemPage(req, "Email activity", "We could not load this message. Refresh the page and try again.", user);
+  }
+
+  const subject = emailSubject(log);
+  return renderPage(req, subject, emailDetailView(domain, log, webhookEvents, engagementEvents), user);
 }
 
 // --- api keys ----------------------------------------------------------------
