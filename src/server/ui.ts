@@ -21,7 +21,7 @@ import {
   checkDomainVerification,
   updateMailFromDomain,
 } from "@/lib/domains";
-import { getDomainApiKeys, generateApiKey, deleteApiKey } from "@/lib/api-keys";
+import { getDomainApiKeys, generateApiKey, deleteApiKey, updateApiKey } from "@/lib/api-keys";
 import { sendEmail } from "@/lib/ses";
 import { query } from "@/lib/database";
 import { checkRateLimit, requestAddress } from "@/lib/rate-limit";
@@ -110,6 +110,9 @@ const FLASH: Record<string, { kind: "ok" | "err" | "mut"; text: string }> = {
   failed: { kind: "err", text: "DNS verification needs attention. Check each record and try again." },
   revoked: { kind: "ok", text: "API key revoked. Apps using it can no longer send email." },
   "revoke-failed": { kind: "err", text: "We could not revoke that API key. Nothing was changed; try again." },
+  "expiry-saved": { kind: "ok", text: "Expiry date saved." },
+  "expiry-failed": { kind: "err", text: "Could not save the expiry date. Try again." },
+  "expiry-invalid": { kind: "err", text: "Enter a date as YYYY-MM-DD." },
   "test-recipient": { kind: "err", text: "Enter a valid recipient email address and try again." },
   "test-failed": { kind: "err", text: "The test email was not sent. Check the recipient address and try again." },
   "test-config": { kind: "err", text: "The email service cannot send this message yet. Ask the administrator to check the sending settings." },
@@ -979,28 +982,43 @@ export async function uiDomainLogs(req: Req): Promise<Response> {
 
 // --- api keys ----------------------------------------------------------------
 
+function expiryCell(value: string | null): string {
+  if (!value) return `<span class="t-mut">never</span>`;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return `<span class="t-mut">never</span>`;
+  const expired = d.getTime() <= Date.now();
+  return expired
+    ? `<span class="status-badge status-failed"><span class="status-mark" aria-hidden="true"></span>expired ${esc(formatDate(value))}</span>`
+    : esc(formatDate(value));
+}
+
 function domainKeysView(
   domain: DomainRow,
   keys: DomainKeys,
   banner = ""
 ): string {
   const rows = keys
-    .map(
-      (k) => {
-        const limits: string[] = [];
-        if (k.rate_limit_per_minute != null) limits.push(`${k.rate_limit_per_minute}/min`);
-        if (k.daily_send_limit != null) limits.push(`${k.daily_send_limit}/day`);
-        const limitLabel = limits.length ? limits.join(" · ") : "—";
-        return `<tr>
+    .map((k) => {
+      const limits: string[] = [];
+      if (k.rate_limit_per_minute != null) limits.push(`${k.rate_limit_per_minute}/min`);
+      if (k.daily_send_limit != null) limits.push(`${k.daily_send_limit}/day`);
+      const limitLabel = limits.length ? limits.join(" · ") : "—";
+      return `<tr>
         <td class="t-name">${esc(k.key_name)}</td>
         <td><code>${esc(k.key_prefix)}…</code></td>
-        <td class="t-mut">${esc((k.permissions ?? []).map((permission) => permission === "send" ? "send email" : permission).join(", "))}</td>
+        <td class="t-mut">${esc((k.permissions ?? []).map((permission) => permission === "send" ? "send email" : permission).join(", ") || "—")}</td>
         <td class="t-mut">${esc(limitLabel)}</td>
+        <td class="t-mut">${expiryCell(k.expires_at)}</td>
         <td class="t-mut">${formatDate(k.created_at)}</td>
-        <td class="right">${actionForm(`/ui/domains/${esc(domain.id)}/keys/${esc(k.id)}/delete`, "revoke", "act danger", `Revoke ${k.key_name}? Apps using it stop working.`)}</td>
+        <td class="right" style="display:flex;gap:6px;justify-content:flex-end;align-items:center">
+          <form class="inline-form" method="post" action="/ui/domains/${esc(domain.id)}/keys/${esc(k.id)}/expiry" style="display:flex;gap:4px;align-items:center">
+            <input type="date" name="expiresAt" value="${k.expires_at ? new Date(k.expires_at).toISOString().slice(0, 10) : ""}" aria-label="Expiry date for ${esc(k.key_name)}" style="width:150px;padding:6px 8px;font-size:12px">
+            <button type="submit" class="act" data-loading-label="saving...">save expiry</button>
+          </form>
+          ${actionForm(`/ui/domains/${esc(domain.id)}/keys/${esc(k.id)}/delete`, "revoke", "act danger", `Revoke ${k.key_name}? Apps using it stop working.`)}
+        </td>
       </tr>`;
-      }
-    )
+    })
     .join("");
   const form =
     domain.status === "verified"
@@ -1008,6 +1026,7 @@ function domainKeysView(
            <label><span>Key name</span><input name="keyName" placeholder="local development" required></label>
            <label><span>Per-minute limit</span><input name="rateLimitPerMinute" type="number" min="1" max="1000000" placeholder="60"></label>
            <label><span>Daily limit</span><input name="dailySendLimit" type="number" min="1" max="1000000" placeholder="1000"></label>
+           <label><span>Expires (optional)</span><input type="date" name="expiresAt" aria-label="Expiry date"></label>
            <button type="submit" class="btn" data-loading-label="creating...">create API key</button>
          </form>`
        : alert("mut", "Verify this domain first. The API key form will appear here when it is ready.");
@@ -1022,8 +1041,8 @@ function domainKeysView(
   return `${banner}${form}
   ${testEmail}
   <div class="table-wrap"><table>
-    <thead><tr><th>name</th><th>key starts with</th><th>access</th><th>limits</th><th>created</th><th class="right">actions</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="6">${emptyState("No API keys yet", domain.status === "verified" ? "Create your first key to send email from this domain." : "Verify this domain before creating an API key.")}</td></tr>`}</tbody>
+    <thead><tr><th>name</th><th>key starts with</th><th>access</th><th>limits</th><th>expires</th><th>created</th><th class="right">actions</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="7">${emptyState("No API keys yet", domain.status === "verified" ? "Create your first key to send email from this domain." : "Verify this domain before creating an API key.")}</td></tr>`}</tbody>
   </table></div>`;
 }
 
@@ -1119,6 +1138,14 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
     return sendTestEmail(req as Req, domain, String(form.get("to") ?? "").trim(), user);
   }
   const keyName = String(form.get("keyName") ?? "").trim().slice(0, 255);
+  const expiresAtRaw = String(form.get("expiresAt") ?? "").trim();
+  const expiresAtDate = expiresAtRaw ? new Date(expiresAtRaw) : null;
+  if (expiresAtDate && isNaN(expiresAtDate.getTime())) {
+    let keys: DomainKeys;
+    try { keys = await getDomainApiKeys(domain.id, user.id); } catch { keys = []; }
+    return renderPage(req, `${domain.domain} keys`, keysBody(domain, keys, alert("err", "Enter a date as YYYY-MM-DD.")), user, { status: 400 });
+  }
+  const expiresAt = expiresAtDate ? expiresAtDate.toISOString() : null;
   const parseLimit = (v: FormDataEntryValue | null): number | null => {
     if (v == null) return null;
     const s = String(v).trim();
@@ -1146,7 +1173,7 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
     if (domain.status !== "verified") banner = alert("err", "Domain must be verified first.");
     else if (!keyName) banner = alert("err", "Key name is required.");
     else {
-      const created = await generateApiKey(user.id, domain.id, keyName, ["send"], { rateLimitPerMinute, dailySendLimit });
+      const created = await generateApiKey(user.id, domain.id, keyName, ["send"], { expiresAt, rateLimitPerMinute, dailySendLimit });
       banner = `<div class="block" role="status">
         <div class="block-title">Your API key is ready</div>
         <p class="key-warning">Copy it now. For your security, this full key will not be shown again.</p>
@@ -1165,6 +1192,29 @@ export async function uiCreateDomainKey(req: Req): Promise<Response> {
     return renderPage(req, `${domain.domain} keys`, keysBody(domain, [], `${banner}${alert("err", message)}`), user, { status: 503 });
   }
   return renderPage(req, `${domain.domain} keys`, keysBody(domain, keys, banner), user);
+}
+
+export async function uiUpdateDomainKeyExpiry(req: Req): Promise<Response> {
+  const user = gate(req);
+  if (user instanceof Response) return user;
+  const form = await csrfForm(req);
+  if (!form) return forbidden();
+  const domain = await getDomainById(pathUuid(req), user.id);
+  if (!domain) return seeOther("/dashboard");
+  const raw = String(form.get("expiresAt") ?? "").trim();
+  let expiresAt: string | null = null;
+  if (raw) {
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return seeOther(`/ui/domains/${domain.id}/keys?m=expiry-invalid`);
+    expiresAt = d.toISOString();
+  }
+  try {
+    await updateApiKey(pathUuid(req, "keyId"), user.id, { expiresAt });
+  } catch (err) {
+    console.error("update key expiry failed:", err);
+    return seeOther(`/ui/domains/${domain.id}/keys?m=expiry-failed`);
+  }
+  return seeOther(`/ui/domains/${domain.id}/keys?m=expiry-saved`);
 }
 
 export async function uiDeleteDomainKey(req: Req): Promise<Response> {

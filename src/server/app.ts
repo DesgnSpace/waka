@@ -29,6 +29,7 @@ export function serveOptions() {
       "/api/emails/batch": methods({ POST: h.sendBatchHandler }),
       "/api/emails/logs": methods({ GET: h.emailLogs }),
       "/api/emails/:id": methods({ GET: h.getEmail }),
+      "/api/usage": methods({ GET: h.usage }),
       "/api/webhooks/ses": methods({ POST: snsWebhook }),
       "/api/tools/email-dns-checker": methods({ POST: h.emailDnsChecker }),
 
@@ -46,6 +47,7 @@ export function serveOptions() {
       "/ui/domains/:id/logs": methods({ GET: ui.uiDomainLogs }),
       "/ui/domains/:id/keys": methods({ GET: ui.uiDomainKeys, POST: ui.uiCreateDomainKey }),
       "/ui/domains/:id/keys/:keyId/delete": methods({ POST: ui.uiDeleteDomainKey }),
+      "/ui/domains/:id/keys/:keyId/expiry": methods({ POST: ui.uiUpdateDomainKeyExpiry }),
     },
     fetch() {
       return Response.json({ error: "Not found" }, { status: 404 });

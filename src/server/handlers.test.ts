@@ -46,6 +46,10 @@ mock.module("@/lib/auth", () => ({
   verifyJWT: () => null,
 }));
 mock.module("@/lib/api-keys", () => ({
+  ExpiredApiKeyError: class ExpiredApiKeyError extends Error {
+    expiresAt: string;
+    constructor(v: string) { super(v); this.expiresAt = v; this.name = "ExpiredApiKeyError"; }
+  },
   verifyApiKey: async () => currentApiKey,
   generateApiKey: async () => {
     throw new Error("not used");
